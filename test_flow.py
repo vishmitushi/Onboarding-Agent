@@ -148,23 +148,14 @@ def step3_voice_call():
 
     provider = os.getenv("VOICE_PROVIDER", "vapi")
 
-    if provider == "vapi":
+    if provider in ("vapi", "vapi_inbound", "vapi_outbound"):
         api_key = os.getenv("VAPI_API_KEY", "")
         phone_id = os.getenv("VAPI_PHONE_ID", "")
         if not api_key:
             fail("VAPI_API_KEY not set in .env")
-            print(f"\n  How to set up Vapi.ai:")
-            print(f"  1. Sign up at {cyan('https://vapi.ai')} (free credits included)")
-            print(f"  2. Go to {bold('Phone Numbers')} → buy a number")
-            print(f"  3. Copy the Phone Number ID")
-            print(f"  4. Go to {bold('Dashboard')} → copy your API key")
-            print(f"  5. Add to .env:")
-            print(f"     VOICE_PROVIDER=vapi")
-            print(f"     VAPI_API_KEY=your_key")
-            print(f"     VAPI_PHONE_ID=your_phone_id\n")
             return False
         if not phone_id:
-            fail("VAPI_PHONE_ID not set in .env (buy a number in Vapi dashboard)")
+            fail("VAPI_PHONE_ID not set in .env")
             return False
         info(f"Vapi.ai API key found: {api_key[:8]}...")
         info(f"Phone Number ID: {phone_id[:8]}...")
@@ -175,23 +166,39 @@ def step3_voice_call():
             return False
         info(f"Bland.ai API key found: {api_key[:8]}...")
 
-    phone = input(f"  Enter your phone number to receive the test call (e.g. +919876543210): ").strip()
-    if not phone:
-        warn("No phone number provided, skipping live call test")
-        return True
-
     from onboarding_agent.integrations.voice_client import BlandVoiceClient
     client = BlandVoiceClient()
 
-    info(f"Placing real AI voice call to {phone} via {provider}...")
-    info("Answer your phone — the AI will ask you to confirm the plan tier.")
-    info("Say 'Enterprise' or 'Growth' when asked.\n")
+    if provider == "vapi_inbound":
+        # Inbound mode: AE calls our Vapi number
+        vapi_number = os.getenv("VAPI_PHONE_NUMBER", "")
+        if not vapi_number:
+            fail("VAPI_PHONE_NUMBER not set in .env")
+            return False
+        info(f"Mode: Inbound — you will call the Vapi number")
+        info(f"The AI assistant will pick up and ask about the plan tier.\n")
 
-    result = client.call_ae_for_plan_confirmation(
-        ae_phone=phone,
-        ae_name="Test AE",
-        customer_name="Acme Corp",
-    )
+        result = client.call_ae_for_plan_confirmation(
+            ae_phone="inbound",
+            ae_name="Test AE",
+            customer_name="Acme Corp",
+        )
+    else:
+        # Outbound mode: system calls the AE
+        phone = input(f"  Enter your phone number to receive the test call (e.g. +919876543210): ").strip()
+        if not phone:
+            warn("No phone number provided, skipping live call test")
+            return True
+
+        info(f"Placing real AI voice call to {phone} via {provider}...")
+        info("Answer your phone — the AI will ask you to confirm the plan tier.")
+        info("Say 'Enterprise' or 'Growth' when asked.\n")
+
+        result = client.call_ae_for_plan_confirmation(
+            ae_phone=phone,
+            ae_name="Test AE",
+            customer_name="Acme Corp",
+        )
 
     info(f"Call ID: {result.call_id}")
     info(f"Status: {result.status}")
