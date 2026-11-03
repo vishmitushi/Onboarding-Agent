@@ -46,7 +46,17 @@ class RocketlaneClient:
         """Find the template matching the plan tier."""
         config = PLAN_TIER_CONFIG[plan_tier]
         template_name = config["template_name"]
-        templates = self.list_templates()
+        try:
+            templates = self.list_templates()
+        except requests.RequestException:
+            log_action(
+                agent_name="RocketlaneClient",
+                action="template_lookup_skipped",
+                inputs={"plan_tier": plan_tier.value},
+                outputs={},
+                decision_rationale="Templates API unavailable; project will be created without a template source",
+            )
+            return None
 
         for tpl in templates:
             if template_name.lower() in tpl.get("name", "").lower():
@@ -133,7 +143,17 @@ class RocketlaneClient:
             raise
 
     def check_existing_projects(self, customer_name: str) -> list[dict[str, Any]]:
-        projects = self.list_projects()
+        try:
+            projects = self.list_projects()
+        except requests.RequestException:
+            log_action(
+                agent_name="RocketlaneClient",
+                action="duplicate_check_skipped",
+                inputs={"customer_name": customer_name},
+                outputs={},
+                decision_rationale="Projects API unavailable; skipping duplicate check",
+            )
+            return []
         return [
             p
             for p in projects

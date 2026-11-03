@@ -65,15 +65,16 @@ This is a deliberate architectural choice:
                     │                                   │
                     │   ┌─────────────┐                 │
                     │   │ parse_email  │ ← Groq LLM     │
-                    │   │ + validate   │   (Llama 3.3)  │
+                    │   │ + validate   │  (Qwen 27B)    │
                     │   └──────┬──────┘                 │
                     │          │                         │
                     │   ┌──────▼──────┐                 │
-                    │   │  call_ae    │ ← Bland.ai      │
-                    │   └──────┬──────┘                 │
+                    │   │  call_ae    │ ← Vapi.ai       │
+                    │   └──────┬──────┘   (web call)    │
                     │          │        ▲ retry          │
                     │   ┌──────▼──────┐ │               │
                     │   │validate_voice│─┘ ← Guardrail  │
+                    │   │ (LLM + kw)  │     (≥80%)      │
                     │   └──────┬──────┘                 │
                     │          │                         │
                     │   ┌──────▼───────┐                │
@@ -93,11 +94,11 @@ This is a deliberate architectural choice:
                                     │
                                     ▼
                     ┌───────────────────────────────────┐
-                    │      Rocketlane Automation         │
-                    │  (configured in-platform)          │
+                    │      Overdue Task Escalation       │
+                    │  (Rocketlane portal + code-based)  │
                     │                                   │
-                    │  Overdue 1 day → Notify PM        │
-                    │  Overdue 4 days → Notify Owner    │
+                    │  Overdue 1 day → Slack → PM       │
+                    │  Overdue 4 days → Slack → Owner   │
                     └───────────────────────────────────┘
 ```
 
@@ -107,9 +108,9 @@ This is a deliberate architectural choice:
 
 **Pipeline**:
 
-1. **parse_email** — Groq LLM (Llama 3.3 70B) extracts structured fields (customer name, contact email, AE name, AE phone, Salesforce link) from the raw email body. Returns JSON. Field validation (Pydantic + custom validators) runs inside this node — missing or malformed fields route directly to `escalate`, never guesses.
-2. **call_ae** — Bland.ai Voice AI places a real outbound call to the AE's phone number. The voice agent asks the AE to confirm the plan tier (Enterprise or Growth). The response is transcribed.
-3. **validate_voice** — Transcript is analyzed for plan tier keywords and confirmation phrases. A confidence score is computed. If confidence < 80%, the conditional edge routes back to `call_ae` (retry loop, up to 2 retries). After max retries → routes to `escalate`.
+1. **parse_email** — Groq LLM (Qwen 27B) extracts structured fields (customer name, contact email, AE name, AE phone, Salesforce link) from the raw email body. Returns JSON. Field validation (Pydantic + custom validators) runs inside this node — missing or malformed fields route directly to `escalate`, never guesses.
+2. **call_ae** — Vapi.ai Voice AI opens a browser-based voice call (web call). The AI assistant asks the AE to confirm the plan tier (Enterprise or Growth). The response is transcribed. Supports multiple modes: `vapi_web` (browser, works internationally), `vapi_inbound` (AE calls), `vapi_outbound` (system calls AE).
+3. **validate_voice** — Transcript is analyzed using a **two-layer approach**: (1) Groq LLM extracts plan tier and confidence from the full transcript, (2) keyword matching on user-only messages as fallback. If confidence < 80%, the conditional edge routes back to `call_ae` (retry loop, up to 2 retries). After max retries → routes to `escalate`.
 4. **check_duplicate** — Queries Rocketlane API for existing active projects matching the customer name. Duplicate found → routes to `escalate`.
 5. **create_project** — Calls the Rocketlane API (`POST /projects`) with the correct template and timeline based on confirmed plan tier.
 
@@ -130,12 +131,20 @@ This is a deliberate architectural choice:
 
 **Action**: Logs the full context (what failed, why, all data collected so far) and marks the workflow as `escalated` for manual resolution by the CS Manager.
 
-### Rocketlane Automation (In-Platform)
+### Overdue Task Escalation (Dual Approach)
 
-Configured directly within Rocketlane's automation engine (not a separate agent):
+Implemented at two levels for reliability:
 
+**1. Rocketlane Portal Automation (In-Platform)**
+Configured directly within Rocketlane's automation engine using the "Task becomes overdue" trigger:
 - **Rule 1**: When a task is overdue by 1 day → Send notification to the Project Manager.
 - **Rule 2**: When a task is overdue by 4 days → Send notification to the Project Owner.
+
+**2. Code-Based Check (Programmatic)**
+`RocketlaneClient.check_overdue_escalations()` fetches tasks via API (`GET /projects/{id}/tasks`), compares due dates against today, and categorizes overdue tasks:
+- **1–3 days overdue** → `notify_pm` → Slack alert to PM
+- **4+ days overdue** → `notify_owner` → Slack escalation to Owner
+- Completed tasks are excluded from the check.
 
 ---
 
@@ -146,7 +155,7 @@ Each guardrail is implemented as a **conditional edge** in the LangGraph workflo
 | Guardrail               | Implementation                                         | Graph Behavior                                                  | Rationale                                               |
 | ----------------------- | ------------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------- |
 | Field validation        | Pydantic models + custom validators                    | `parse_email` → fail → `escalate`                      | Never guess missing customer details                    |
-| Voice confirmation gate | Confidence score ≥ 80% required                       | `validate_voice` → fail → retry `call_ae` or `escalate` | Prevents template mix-ups — the #1 reported pain point |
+| Voice confirmation gate | Confidence score ≥ 80% required (LLM + keyword)       | `validate_voice` → fail → retry `call_ae` or `escalate` | Prevents template mix-ups — the #1 reported pain point |
 | Retry + escalation      | Up to 2 voice call retries                             | Graph cycle: `call_ae` ↔ `validate_voice`, max 2 loops     | Graceful degradation without blocking indefinitely      |
 | Duplicate detection     | Query Rocketlane for active projects                   | `check_duplicate` → dup found → `escalate`                | Prevents duplicate onboarding projects                  |
 | Full audit trail        | Every node logs: timestamp, inputs, outputs, rationale | Runs in every node, exported as JSON                            | Traceability and debugging                              |
@@ -173,13 +182,13 @@ Each guardrail is implemented as a **conditional edge** in the LangGraph workflo
 | ------------------ | ---------------------------------- | ------------------------------------------------------------------------------ |
 | Language           | Python 3.11+                       | Ecosystem, typing, async-ready                                                 |
 | Agentic Framework  | **LangGraph** (by LangChain) | Graph-based workflow with conditional edges, retry loops, and state management |
-| LLM                | Groq (Llama 3.3 70B)              | Free, fast structured extraction from unstructured email text                  |
-| Voice AI           | Bland.ai                           | Real outbound AI voice calls, free tier, transcription                         |
+| LLM                | Groq (Qwen 27B)                   | Free, fast structured extraction from email text + transcript analysis         |
+| Voice AI           | Vapi.ai (Web Call)                 | Browser-based AI voice calls, works internationally, GPT-4.1 model            |
 | Project Management | Rocketlane API                     | Per the assignment requirement                                                 |
 | Communication      | Slack API (mock-compatible)        | Standard CS team communication                                                 |
 | Data Validation    | Pydantic v2                        | Type-safe models with built-in validation                                      |
 | Email              | Gmail IMAP (App Password)          | Real inbox monitoring, no OAuth setup needed                                   |
-| Testing            | pytest (45 tests)                  | Unit + integration + workflow tests with mocked external APIs                  |
+| Testing            | pytest (49 tests)                  | Unit + integration + workflow + overdue escalation tests                       |
 
 ---
 
@@ -198,7 +207,7 @@ onboarding_agent/
 │   └── communication_agent.py     ← Agent 2: Slack channel setup
 ├── integrations/
 │   ├── gmail_client.py            ← Gmail IMAP (App Password)
-│   ├── voice_client.py            ← Bland.ai voice calls
+│   ├── voice_client.py            ← Vapi.ai voice calls (web/inbound/outbound)
 │   ├── rocketlane_client.py       ← Rocketlane API
 │   └── slack_client.py            ← Slack Bot API
 ├── guardrails/
@@ -206,10 +215,10 @@ onboarding_agent/
 │   └── validators.py              ← Field, voice, and duplicate validators
 ├── models/
 │   └── schemas.py                 ← Pydantic models + tier config
-└── tests/                         ← 45 automated tests
+└── tests/                         ← 49 automated tests
     ├── test_intake_agent.py       ← 19 agent-level tests
     ├── test_communication_agent.py ← 4 communication tests
-    ├── test_guardrails.py         ← 17 guardrail tests
+    ├── test_guardrails.py         ← 21 guardrail + overdue escalation tests
     └── test_workflow.py           ← 9 LangGraph workflow tests
 ```
 
@@ -226,7 +235,8 @@ onboarding_agent/
 | Duplicate Detection | 4            | Active duplicate blocked, completed project allowed, case-insensitive |
 | API Failures        | 2            | Rocketlane down, Slack failure (non-blocking)                         |
 | Audit Trail         | 3            | Logging, JSON export, all steps logged in workflow                    |
-| **Total**     | **45** |                                                                       |
+| Overdue Escalation  | 4            | 1-day PM notify, 4-day owner notify, completed excluded, mixed levels |
+| **Total**     | **49** |                                                                       |
 
 ---
 
