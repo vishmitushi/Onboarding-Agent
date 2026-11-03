@@ -1,0 +1,9 @@
+[project]
+name = "onboarding-agent"
+version = "1.0.0"
+description = "Customer Onboarding Automation for NovaCRM"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["onboarding_agent/tests"]
+pythonpath = ["."]

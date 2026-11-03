@@ -1,0 +1,888 @@
+<title>Onboarding Agent Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Layout: vertical scroll, card-based flow with connecting lines */
+  :root {
+    --bg: #FAFBFD;
+    --surface: #FFFFFF;
+    --surface-alt: #F3F5F9;
+    --border: #E2E6EE;
+    --fg: #1A1D26;
+    --fg-muted: #6B7280;
+    --accent: #4F46E5;
+    --accent-soft: #EEF2FF;
+    --green: #059669;
+    --green-soft: #ECFDF5;
+    --amber: #D97706;
+    --amber-soft: #FFFBEB;
+    --red: #DC2626;
+    --red-soft: #FEF2F2;
+    --blue: #2563EB;
+    --blue-soft: #EFF6FF;
+    --connector: #C7D2E0;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F1117;
+      --surface: #1A1D28;
+      --surface-alt: #232738;
+      --border: #2E3347;
+      --fg: #E8EAF0;
+      --fg-muted: #8B92A5;
+      --accent: #818CF8;
+      --accent-soft: #1E1B4B;
+      --green: #34D399;
+      --green-soft: #064E3B;
+      --amber: #FBBF24;
+      --amber-soft: #451A03;
+      --red: #F87171;
+      --red-soft: #450A0A;
+      --blue: #60A5FA;
+      --blue-soft: #1E3A5F;
+      --connector: #3B4259;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F1117;
+    --surface: #1A1D28;
+    --surface-alt: #232738;
+    --border: #2E3347;
+    --fg: #E8EAF0;
+    --fg-muted: #8B92A5;
+    --accent: #818CF8;
+    --accent-soft: #1E1B4B;
+    --green: #34D399;
+    --green-soft: #064E3B;
+    --amber: #FBBF24;
+    --amber-soft: #451A03;
+    --red: #F87171;
+    --red-soft: #450A0A;
+    --blue: #60A5FA;
+    --blue-soft: #1E3A5F;
+    --connector: #3B4259;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    margin: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 2rem;
+    line-height: 1.6;
+  }
+
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 0.25rem;
+    text-wrap: balance;
+  }
+
+  .subtitle {
+    color: var(--fg-muted);
+    font-size: 0.95rem;
+    margin: 0 0 2.5rem;
+  }
+
+  /* Tab navigation */
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid var(--border);
+    overflow-x: auto;
+  }
+
+  .tab {
+    padding: 0.6rem 1.1rem;
+    font: 500 0.875rem var(--font-body);
+    color: var(--fg-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .tab:hover { color: var(--fg); }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Flow section */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  .flow-step {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 0;
+    min-height: 0;
+  }
+
+  .flow-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .flow-dot {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .flow-line {
+    width: 2px;
+    flex: 1;
+    background: var(--connector);
+    min-height: 16px;
+  }
+
+  .flow-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .flow-card h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .flow-card p {
+    margin: 0 0 0.75rem;
+    color: var(--fg-muted);
+    font-size: 0.875rem;
+  }
+
+  .flow-card p:last-child { margin-bottom: 0; }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.55rem;
+    border-radius: 99px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+
+  .badge-agent { background: var(--accent-soft); color: var(--accent); }
+  .badge-integration { background: var(--blue-soft); color: var(--blue); }
+  .badge-guardrail { background: var(--amber-soft); color: var(--amber); }
+  .badge-success { background: var(--green-soft); color: var(--green); }
+  .badge-error { background: var(--red-soft); color: var(--red); }
+
+  .dot-agent { background: var(--accent-soft); color: var(--accent); }
+  .dot-integration { background: var(--blue-soft); color: var(--blue); }
+  .dot-guardrail { background: var(--amber-soft); color: var(--amber); }
+  .dot-success { background: var(--green-soft); color: var(--green); }
+
+  /* Detail list */
+  .detail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .detail-list li {
+    font-size: 0.82rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    color: var(--fg);
+    line-height: 1.5;
+  }
+
+  .detail-list li::before {
+    content: "→";
+    color: var(--accent);
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  /* Code snippets */
+  .code-ref {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: var(--surface-alt);
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+
+  /* Branch / decision */
+  .decision-box {
+    background: var(--surface-alt);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .decision-box h4 {
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: var(--fg);
+  }
+
+  .branch {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .branch-path {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.65rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .branch-path.pass {
+    background: var(--green-soft);
+    border-left: 3px solid var(--green);
+    color: var(--fg);
+  }
+
+  .branch-path.fail {
+    background: var(--red-soft);
+    border-left: 3px solid var(--red);
+    color: var(--fg);
+  }
+
+  .branch-label {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+
+  /* Architecture overview */
+  .arch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+
+  .arch-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+  }
+
+  .arch-card h3 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .arch-card ul {
+    margin: 0;
+    padding: 0 0 0 1.1rem;
+    font-size: 0.82rem;
+    color: var(--fg-muted);
+  }
+
+  .arch-card ul li { margin-bottom: 0.25rem; }
+
+  .file-tree {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.8;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    color: var(--fg-muted);
+  }
+
+  .file-tree .dir { color: var(--accent); font-weight: 500; }
+  .file-tree .file { color: var(--fg); }
+  .file-tree .desc { color: var(--fg-muted); }
+
+  /* Test summary */
+  .test-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .test-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+  }
+
+  .test-card h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+  }
+
+  .test-card ul {
+    margin: 0; padding: 0;
+    list-style: none;
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+  }
+
+  .test-card ul li {
+    padding: 0.15rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .test-card ul li::before {
+    content: "✓";
+    color: var(--green);
+    font-weight: 700;
+    font-size: 0.7rem;
+  }
+
+  .stat-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0;
+  }
+
+  .stat-tile {
+    flex: 1;
+    min-width: 120px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+  }
+
+  .stat-tile .num {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-tile .label {
+    font-size: 0.75rem;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.15rem;
+  }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.35rem; }
+    .flow-step { grid-template-columns: 40px 1fr; }
+    .flow-dot { width: 32px; height: 32px; font-size: 0.7rem; }
+    .flow-card { padding: 1rem; }
+    .branch { flex-direction: column; }
+  }
+</style>
+
+<div class="container">
+  <h1>NovaCRM Onboarding Agent — Implementation Flow</h1>
+  <p class="subtitle">Multi-agent system that automates customer onboarding from deal close to Slack channel setup</p>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="flow">End-to-End Flow</button>
+    <button class="tab" data-tab="arch">Architecture</button>
+    <button class="tab" data-tab="guardrails">Guardrails</button>
+    <button class="tab" data-tab="tests">Test Coverage</button>
+  </div>
+
+  <!-- TAB 1: FLOW -->
+  <div class="tab-content active" id="tab-flow">
+    <div class="flow">
+
+      <!-- Step 1 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-integration">1</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Gmail Inbox Monitoring <span class="badge badge-integration">Integration</span></h3>
+          <p>The orchestrator polls Gmail every 30 seconds, looking for unread emails matching deal notification patterns (subject contains "new deal", "closed won", etc.).</p>
+          <ul class="detail-list">
+            <li>Uses Gmail API with OAuth2 authentication</li>
+            <li>Filters: <span class="code-ref">is:unread subject:(new deal OR closed won)</span></li>
+            <li>Extracts subject, sender, body, and message ID</li>
+          </ul>
+          <div class="decision-box">
+            <h4>What happens next?</h4>
+            <div class="branch">
+              <div class="branch-path pass"><span class="branch-label">Email found</span>Raw email data passed to Intake Agent for parsing</div>
+              <div class="branch-path fail"><span class="branch-label">No emails</span>Log "no new deals", sleep 30s, poll again</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-agent">2</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>LLM Email Parsing <span class="badge badge-agent">Intake Agent</span></h3>
+          <p>Claude extracts structured fields from the raw email body. The LLM is prompted to return a JSON object with exactly the fields we need.</p>
+          <ul class="detail-list">
+            <li><strong>Extracted fields:</strong> customer_name, customer_contact_email, ae_name, ae_phone, salesforce_opportunity_link</li>
+            <li>LLM response is parsed as JSON; if unparseable, the email is rejected</li>
+            <li>Plan tier is intentionally NOT extracted — that comes from the voice call</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">3</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Field Validation <span class="badge badge-guardrail">Guardrail</span></h3>
+          <p>Every parsed field is validated before the pipeline proceeds. The agent never guesses missing data.</p>
+          <ul class="detail-list">
+            <li>All 5 required fields must be present and non-empty</li>
+            <li>Email format check (regex)</li>
+            <li>Phone number must have at least 10 digits</li>
+            <li>Salesforce link checked (warning, not blocking)</li>
+          </ul>
+          <div class="decision-box">
+            <h4>Validation outcome</h4>
+            <div class="branch">
+              <div class="branch-path pass"><span class="branch-label">All fields valid</span>Proceed to voice call step</div>
+              <div class="branch-path fail"><span class="branch-label">Missing / invalid fields</span>Log validation errors with specifics, stop processing this email. Escalate for clarification.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-integration">4</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Voice Call to AE <span class="badge badge-integration">Bland.ai</span></h3>
+          <p>A real outbound phone call is placed to the AE using Bland.ai's Voice API. The AI voice agent asks the AE to confirm whether the customer is on Enterprise or Growth.</p>
+          <ul class="detail-list">
+            <li>Personalized opening: <em>"Hi {ae_name}, calling about {customer_name}…"</em></li>
+            <li>Asks for plan tier, then repeats back for confirmation</li>
+            <li>Call is recorded and transcribed</li>
+            <li>Agent polls Bland.ai for call completion (up to 3 minutes)</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">5</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Voice Call Validation <span class="badge badge-guardrail">Guardrail</span></h3>
+          <p>The transcript is analyzed for plan tier keywords and confirmation phrases. A confidence score is computed — the agent will NOT proceed unless it's ≥ 80%.</p>
+          <ul class="detail-list">
+            <li><strong>Enterprise signals:</strong> "enterprise", "30-day", "dedicated CSM"</li>
+            <li><strong>Growth signals:</strong> "growth", "14-day", "pooled CSM"</li>
+            <li><strong>Confirmation boost:</strong> "yes", "correct", "confirmed" adds +20% confidence</li>
+            <li><strong>Ambiguity:</strong> If both tiers mentioned, confidence drops to 30%</li>
+          </ul>
+          <div class="decision-box">
+            <h4>Three possible outcomes</h4>
+            <div class="branch">
+              <div class="branch-path pass"><span class="branch-label">Clear confirmation (≥80%)</span>Proceed with confirmed plan tier</div>
+              <div class="branch-path fail"><span class="branch-label">Failed / ambiguous</span>Retry up to 2 more times. After all retries fail → escalate to CS Manager for manual handling. Never guess the tier.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 6 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">6</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Duplicate Project Check <span class="badge badge-guardrail">Guardrail</span></h3>
+          <p>Before creating anything, query Rocketlane for existing active projects matching this customer name.</p>
+          <div class="decision-box">
+            <h4>Duplicate check result</h4>
+            <div class="branch">
+              <div class="branch-path pass"><span class="branch-label">No active duplicates</span>Safe to create new project</div>
+              <div class="branch-path fail"><span class="branch-label">Active project exists</span>Block creation, log the conflict, flag for human review</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 7 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-integration">7</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Create Rocketlane Project <span class="badge badge-integration">Rocketlane API</span></h3>
+          <p>The project is created via the Rocketlane API with the correct template and configuration based on the confirmed plan tier.</p>
+          <ul class="detail-list">
+            <li><strong>Enterprise:</strong> "Enterprise Onboarding - 30 Day" template, dedicated CSM, 30 days</li>
+            <li><strong>Growth:</strong> "Growth Onboarding - 14 Day" template, pooled CSM, 14 days</li>
+            <li>Both include 4 phases: Kickoff → Data Migration → Configuration → Go-Live</li>
+            <li>If Rocketlane API is down, the error propagates and is logged</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Step 8 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-agent">8</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Create Slack Channel <span class="badge badge-agent">Communication Agent</span></h3>
+          <p>A dedicated Slack channel is created for onboarding communication, personalized by plan tier.</p>
+          <ul class="detail-list">
+            <li><strong>Channel name:</strong> <span class="code-ref">onb-{customer}-{tier}</span></li>
+            <li><strong>Topic:</strong> Includes customer name, plan, duration, CSM type</li>
+            <li><strong>Enterprise welcome:</strong> Mentions dedicated CSM, 30-day timeline, kickoff within 24h</li>
+            <li><strong>Growth welcome:</strong> Mentions pooled support team, 14-day timeline</li>
+            <li>Slack failure doesn't block the project — it's logged and flagged for manual setup</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Step 9 -->
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-success">9</div>
+          <div class="flow-line" style="background: transparent;"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Complete &amp; Audit <span class="badge badge-success">Done</span></h3>
+          <p>The email is marked as read in Gmail, the full audit trail is logged, and the orchestrator resumes polling for the next deal.</p>
+          <ul class="detail-list">
+            <li>Every step logged: timestamp, agent, action, inputs, outputs, rationale</li>
+            <li>Audit trail exportable as JSON for review</li>
+            <li>Email marked as read to prevent reprocessing</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TAB 2: ARCHITECTURE -->
+  <div class="tab-content" id="tab-arch">
+    <div class="arch-grid">
+      <div class="arch-card" style="border-left: 3px solid var(--accent);">
+        <h3><span class="badge badge-agent">Agent</span> Intake Agent</h3>
+        <ul>
+          <li>Parses deal emails via Claude LLM</li>
+          <li>Validates all fields</li>
+          <li>Calls AE via Bland.ai voice</li>
+          <li>Creates Rocketlane project</li>
+          <li>Retries and escalation logic</li>
+        </ul>
+      </div>
+      <div class="arch-card" style="border-left: 3px solid var(--accent);">
+        <h3><span class="badge badge-agent">Agent</span> Communication Agent</h3>
+        <ul>
+          <li>Creates Slack channel</li>
+          <li>Sets personalized topic</li>
+          <li>Posts tier-specific welcome</li>
+          <li>Handles Slack failures gracefully</li>
+        </ul>
+      </div>
+      <div class="arch-card" style="border-left: 3px solid var(--blue);">
+        <h3><span class="badge badge-integration">Integration</span> Gmail</h3>
+        <ul>
+          <li>OAuth2 authentication</li>
+          <li>Poll for unread deal emails</li>
+          <li>Extract headers + body</li>
+          <li>Mark processed as read</li>
+        </ul>
+      </div>
+      <div class="arch-card" style="border-left: 3px solid var(--blue);">
+        <h3><span class="badge badge-integration">Integration</span> Bland.ai Voice</h3>
+        <ul>
+          <li>Outbound AI voice calls</li>
+          <li>Custom conversation prompt</li>
+          <li>Transcript-based analysis</li>
+          <li>Confidence scoring</li>
+        </ul>
+      </div>
+      <div class="arch-card" style="border-left: 3px solid var(--blue);">
+        <h3><span class="badge badge-integration">Integration</span> Rocketlane</h3>
+        <ul>
+          <li>Project creation via API</li>
+          <li>Template lookup</li>
+          <li>Duplicate detection</li>
+          <li>In-platform automation rules</li>
+        </ul>
+      </div>
+      <div class="arch-card" style="border-left: 3px solid var(--blue);">
+        <h3><span class="badge badge-integration">Integration</span> Slack</h3>
+        <ul>
+          <li>Channel creation</li>
+          <li>Topic + welcome message</li>
+          <li>Sanitized channel naming</li>
+          <li>Mockable for demo</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="font-size: 1rem; margin: 2rem 0 0.75rem;">Project Structure</h3>
+    <div class="file-tree">
+<span class="dir">onboarding_agent/</span>
+├── <span class="file">config.py</span>          <span class="desc">← Settings loaded from .env</span>
+├── <span class="file">main.py</span>            <span class="desc">← Orchestrator: poll loop + coordination</span>
+├── <span class="dir">agents/</span>
+│   ├── <span class="file">intake_agent.py</span>        <span class="desc">← Agent 1: Parse → Voice → Create</span>
+│   └── <span class="file">communication_agent.py</span> <span class="desc">← Agent 2: Slack channel setup</span>
+├── <span class="dir">integrations/</span>
+│   ├── <span class="file">gmail_client.py</span>    <span class="desc">← Gmail API (OAuth2)</span>
+│   ├── <span class="file">voice_client.py</span>    <span class="desc">← Bland.ai voice calls</span>
+│   ├── <span class="file">rocketlane_client.py</span> <span class="desc">← Rocketlane API</span>
+│   └── <span class="file">slack_client.py</span>    <span class="desc">← Slack Bot API</span>
+├── <span class="dir">guardrails/</span>
+│   ├── <span class="file">logger.py</span>      <span class="desc">← Audit trail with JSON export</span>
+│   └── <span class="file">validators.py</span>  <span class="desc">← Field, voice, duplicate validators</span>
+├── <span class="dir">models/</span>
+│   └── <span class="file">schemas.py</span>     <span class="desc">← Pydantic models + tier config</span>
+└── <span class="dir">tests/</span>             <span class="desc">← 36 automated tests</span>
+    ├── <span class="file">test_intake_agent.py</span>
+    ├── <span class="file">test_communication_agent.py</span>
+    └── <span class="file">test_guardrails.py</span>
+    </div>
+  </div>
+
+  <!-- TAB 3: GUARDRAILS -->
+  <div class="tab-content" id="tab-guardrails">
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">G1</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Input Validation — Never Guess</h3>
+          <p>Every required field (customer name, email, AE name, AE phone, Salesforce link) is validated with Pydantic + custom checks. If any field is missing, malformed, or empty, the agent stops and logs exactly what's wrong — it never fills in a guess.</p>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">G2</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Voice Confirmation Gate — No Ambiguity Allowed</h3>
+          <p>Project creation is blocked until the voice call returns a plan tier with ≥ 80% confidence. Low confidence, no answer, or ambiguous responses trigger retries (up to 2), then human escalation. The agent never assumes a tier.</p>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">G3</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Retry + Escalation — Graceful Degradation</h3>
+          <p>Failed voice calls retry up to 2 more times. After all retries exhaust, the system escalates to the CS Manager rather than blocking indefinitely or making a decision without data.</p>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">G4</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Duplicate Detection — No Double Onboarding</h3>
+          <p>Before creating a project, the agent queries Rocketlane for existing active projects with the same customer name (case-insensitive). Completed projects are ignored; active/in-progress ones block creation.</p>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">G5</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card">
+          <h3>Full Audit Trail — Every Decision Traced</h3>
+          <p>Every agent action is logged with: timestamp, agent name, action type, full inputs and outputs, decision rationale, and success/failure status. Exportable as JSON for compliance and debugging.</p>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-indicator">
+          <div class="flow-dot dot-guardrail">G6</div>
+          <div class="flow-line"></div>
+        </div>
+        <div class="flow-card" style="margin-bottom: 0;">
+          <h3>LLM Output Validation — Reject Garbage</h3>
+          <p>If the LLM returns something that isn't parseable JSON, or returns text without the expected structure, the email is rejected and logged. No downstream processing happens on unstructured LLM output.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: TESTS -->
+  <div class="tab-content" id="tab-tests">
+    <div class="stat-row">
+      <div class="stat-tile">
+        <div class="num">36</div>
+        <div class="label">Tests</div>
+      </div>
+      <div class="stat-tile">
+        <div class="num" style="color: var(--green);">36</div>
+        <div class="label">Passing</div>
+      </div>
+      <div class="stat-tile">
+        <div class="num" style="color: var(--red);">0</div>
+        <div class="label">Failing</div>
+      </div>
+      <div class="stat-tile">
+        <div class="num">4</div>
+        <div class="label">Categories</div>
+      </div>
+    </div>
+
+    <div class="test-grid">
+      <div class="test-card">
+        <h4 style="color: var(--green);">Happy Path (4 tests)</h4>
+        <ul>
+          <li>Parse valid email → structured DealEmail</li>
+          <li>Enterprise plan voice confirmation</li>
+          <li>Growth plan voice confirmation</li>
+          <li>Full E2E: email → voice → project</li>
+        </ul>
+      </div>
+
+      <div class="test-card">
+        <h4 style="color: var(--amber);">Validation (4 tests)</h4>
+        <ul>
+          <li>Rejects missing customer name</li>
+          <li>Rejects missing contact email</li>
+          <li>Rejects invalid email format</li>
+          <li>Rejects short phone number</li>
+        </ul>
+      </div>
+
+      <div class="test-card">
+        <h4 style="color: var(--blue);">Template Accuracy (2 tests)</h4>
+        <ul>
+          <li>Enterprise → 30-day, dedicated CSM</li>
+          <li>Growth → 14-day, pooled CSM</li>
+        </ul>
+      </div>
+
+      <div class="test-card">
+        <h4 style="color: var(--red);">Edge Cases (5 tests)</h4>
+        <ul>
+          <li>Rocketlane API down</li>
+          <li>Duplicate project blocked</li>
+          <li>AE doesn't answer phone</li>
+          <li>AE gives ambiguous response</li>
+          <li>LLM returns garbage text</li>
+        </ul>
+      </div>
+
+      <div class="test-card">
+        <h4 style="color: var(--accent);">Guardrails (17 tests)</h4>
+        <ul>
+          <li>Email validation (6 scenarios)</li>
+          <li>Voice call validation (5 scenarios)</li>
+          <li>Duplicate detection (4 scenarios)</li>
+          <li>Audit logging + export (2 tests)</li>
+        </ul>
+      </div>
+
+      <div class="test-card">
+        <h4 style="color: var(--accent);">Communication Agent (4 tests)</h4>
+        <ul>
+          <li>Enterprise channel creation</li>
+          <li>Growth channel creation</li>
+          <li>Slack failure graceful handling</li>
+          <li>Audit trail logged correctly</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+</script>
