@@ -55,7 +55,7 @@ This is a deliberate architectural choice:
 ```
                          ┌─────────────────────┐
                          │   Gmail Polling      │
-                         │   (Orchestrator)     │
+                         │   (IMAP Trigger)     │
                          └──────────┬───────────┘
                                     │ new deal email
                                     ▼
@@ -64,11 +64,8 @@ This is a deliberate architectural choice:
                     │        (StateGraph)                │
                     │                                   │
                     │   ┌─────────────┐                 │
-                    │   │ parse_email  │ ← Claude LLM   │
-                    │   └──────┬──────┘                 │
-                    │          │                         │
-                    │   ┌──────▼──────┐                 │
-                    │   │validate_email│ ← Guardrail    │
+                    │   │ parse_email  │ ← Groq LLM     │
+                    │   │ + validate   │   (Llama 3.3)  │
                     │   └──────┬──────┘                 │
                     │          │                         │
                     │   ┌──────▼──────┐                 │
@@ -104,18 +101,17 @@ This is a deliberate architectural choice:
                     └───────────────────────────────────┘
 ```
 
-### Agent 1 — Intake & Routing (Nodes: parse_email → validate_email → call_ae → validate_voice → check_duplicate → create_project)
+### Agent 1 — Intake & Routing (Nodes: parse_email → call_ae → validate_voice → check_duplicate → create_project)
 
 **Trigger**: New unread email in Gmail matching deal notification pattern.
 
 **Pipeline**:
 
-1. **parse_email** — Claude LLM extracts structured fields (customer name, contact email, AE name, AE phone, Salesforce link) from the raw email body. Returns JSON.
-2. **validate_email** — Pydantic + custom validators ensure all required fields are present and well-formed. Missing fields → conditional edge routes to `escalate` node, never guesses.
-3. **call_ae** — Bland.ai Voice AI places a real outbound call to the AE's phone number. The voice agent asks the AE to confirm the plan tier (Enterprise or Growth). The response is transcribed.
-4. **validate_voice** — Transcript is analyzed for plan tier keywords and confirmation phrases. A confidence score is computed. If confidence < 80%, the conditional edge routes back to `call_ae` (retry loop, up to 2 retries). After max retries → routes to `escalate`.
-5. **check_duplicate** — Queries Rocketlane API for existing active projects matching the customer name. Duplicate found → routes to `escalate`.
-6. **create_project** — Calls the Rocketlane API (`POST /projects`) with the correct template and timeline based on confirmed plan tier.
+1. **parse_email** — Groq LLM (Llama 3.3 70B) extracts structured fields (customer name, contact email, AE name, AE phone, Salesforce link) from the raw email body. Returns JSON. Field validation (Pydantic + custom validators) runs inside this node — missing or malformed fields route directly to `escalate`, never guesses.
+2. **call_ae** — Bland.ai Voice AI places a real outbound call to the AE's phone number. The voice agent asks the AE to confirm the plan tier (Enterprise or Growth). The response is transcribed.
+3. **validate_voice** — Transcript is analyzed for plan tier keywords and confirmation phrases. A confidence score is computed. If confidence < 80%, the conditional edge routes back to `call_ae` (retry loop, up to 2 retries). After max retries → routes to `escalate`.
+4. **check_duplicate** — Queries Rocketlane API for existing active projects matching the customer name. Duplicate found → routes to `escalate`.
+5. **create_project** — Calls the Rocketlane API (`POST /projects`) with the correct template and timeline based on confirmed plan tier.
 
 ### Agent 2 — Communication (Node: create_slack_channel)
 
@@ -149,7 +145,7 @@ Each guardrail is implemented as a **conditional edge** in the LangGraph workflo
 
 | Guardrail               | Implementation                                         | Graph Behavior                                                  | Rationale                                               |
 | ----------------------- | ------------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------- |
-| Field validation        | Pydantic models + custom validators                    | `validate_email` → fail → `escalate`                      | Never guess missing customer details                    |
+| Field validation        | Pydantic models + custom validators                    | `parse_email` → fail → `escalate`                      | Never guess missing customer details                    |
 | Voice confirmation gate | Confidence score ≥ 80% required                       | `validate_voice` → fail → retry `call_ae` or `escalate` | Prevents template mix-ups — the #1 reported pain point |
 | Retry + escalation      | Up to 2 voice call retries                             | Graph cycle: `call_ae` ↔ `validate_voice`, max 2 loops     | Graceful degradation without blocking indefinitely      |
 | Duplicate detection     | Query Rocketlane for active projects                   | `check_duplicate` → dup found → `escalate`                | Prevents duplicate onboarding projects                  |
@@ -177,12 +173,12 @@ Each guardrail is implemented as a **conditional edge** in the LangGraph workflo
 | ------------------ | ---------------------------------- | ------------------------------------------------------------------------------ |
 | Language           | Python 3.11+                       | Ecosystem, typing, async-ready                                                 |
 | Agentic Framework  | **LangGraph** (by LangChain) | Graph-based workflow with conditional edges, retry loops, and state management |
-| LLM                | Claude (Anthropic API)             | Reliable structured extraction from unstructured email text                    |
+| LLM                | Groq (Llama 3.3 70B)              | Free, fast structured extraction from unstructured email text                  |
 | Voice AI           | Bland.ai                           | Real outbound AI voice calls, free tier, transcription                         |
 | Project Management | Rocketlane API                     | Per the assignment requirement                                                 |
 | Communication      | Slack API (mock-compatible)        | Standard CS team communication                                                 |
 | Data Validation    | Pydantic v2                        | Type-safe models with built-in validation                                      |
-| Email              | Gmail API (OAuth2)                 | Real inbox monitoring                                                          |
+| Email              | Gmail IMAP (App Password)          | Real inbox monitoring, no OAuth setup needed                                   |
 | Testing            | pytest (45 tests)                  | Unit + integration + workflow tests with mocked external APIs                  |
 
 ---
@@ -195,13 +191,13 @@ onboarding_agent/
 ├── main.py                        ← LangGraph orchestrator + Gmail polling
 ├── graph/                         ← LangGraph workflow
 │   ├── state.py                   ← OnboardingState TypedDict
-│   ├── nodes.py                   ← 8 node functions + 5 routing functions
+│   ├── nodes.py                   ← 7 node functions + 4 routing functions
 │   └── workflow.py                ← StateGraph construction + compilation
 ├── agents/
 │   ├── intake_agent.py            ← Agent 1: email parsing, voice call, project creation
 │   └── communication_agent.py     ← Agent 2: Slack channel setup
 ├── integrations/
-│   ├── gmail_client.py            ← Gmail API (OAuth2)
+│   ├── gmail_client.py            ← Gmail IMAP (App Password)
 │   ├── voice_client.py            ← Bland.ai voice calls
 │   ├── rocketlane_client.py       ← Rocketlane API
 │   └── slack_client.py            ← Slack Bot API

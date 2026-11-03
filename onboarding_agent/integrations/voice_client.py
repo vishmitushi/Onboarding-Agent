@@ -54,9 +54,7 @@ class BlandVoiceClient:
             "wait_for_greeting": True,
             "record": True,
             "max_duration": 2,
-            "model": "enhanced",
             "language": "en",
-            "answered_by_enabled": True,
         }
 
         log_action(
@@ -78,6 +76,18 @@ class BlandVoiceClient:
                 headers=self.headers,
                 timeout=30,
             )
+            if response.status_code != 200:
+                error_detail = response.text[:500]
+                log_action(
+                    agent_name="VoiceClient",
+                    action="call_api_error",
+                    inputs={"status_code": response.status_code},
+                    outputs={"error": error_detail},
+                    success=False,
+                    error_message=error_detail,
+                    decision_rationale="Bland.ai API returned an error",
+                )
+                print(f"  Bland.ai error detail: {error_detail}")
             response.raise_for_status()
             call_data = response.json()
             call_id = call_data.get("call_id", "")

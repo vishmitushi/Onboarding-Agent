@@ -195,12 +195,19 @@ def step3_voice_call():
 def step4_email_parsing():
     header(4, "Email Parsing with LLM")
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        fail("ANTHROPIC_API_KEY not set in .env")
-        return False
-
-    info("API key found")
+    provider = os.getenv("LLM_PROVIDER", "groq")
+    if provider == "groq":
+        api_key = os.getenv("GROQ_API_KEY", "")
+        if not api_key:
+            fail("GROQ_API_KEY not set in .env")
+            return False
+        info(f"Groq API key found — using model: {os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')}")
+    else:
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            fail("ANTHROPIC_API_KEY not set in .env")
+            return False
+        info("Anthropic API key found")
 
     from onboarding_agent.agents.intake_agent import IntakeAgent
 
@@ -223,7 +230,7 @@ def step4_email_parsing():
 
     agent = IntakeAgent()
 
-    info("Sending sample email to Claude for parsing...")
+    info("Sending sample email to LLM for parsing...")
     deal = agent.parse_email(sample_email)
 
     if deal is None:
@@ -441,13 +448,12 @@ def step6_full_flow():
 # ── Main ────────────────────────────────────────────────────────────
 
 STEPS = {
-    "1": ("Rocketlane API Connection", step1_rocketlane_connection)
-    # ,
-    # "2": ("Rocketlane Project Creation", step2_rocketlane_create_project),
-    # "3": ("Bland.ai Voice Call", step3_voice_call),
-    # "4": ("Email Parsing (LLM)", step4_email_parsing),
-    # "5": ("Slack Channel (Mock OK)", step5_slack),
-    # "6": ("Full Happy Path", step6_full_flow),
+    "1": ("Rocketlane API Connection", step1_rocketlane_connection),
+    "2": ("Rocketlane Project Creation", step2_rocketlane_create_project),
+    "3": ("Bland.ai Voice Call", step3_voice_call),
+    "4": ("Email Parsing (LLM)", step4_email_parsing),
+    "5": ("Slack Channel", step5_slack),
+    "6": ("Full Happy Path", step6_full_flow),
 }
 
 def main():

@@ -1,105 +1,103 @@
 from __future__ import annotations
 
-import base64
-import os
-import re
+import email
+import imaplib
+from email.header import decode_header
 from typing import Any
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
 
 from onboarding_agent.config import settings
 from onboarding_agent.guardrails import log_action
 
 
 class GmailClient:
-    SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+    """Monitors a Gmail inbox for deal notification emails via IMAP.
+
+    Setup (one-time):
+      1. Enable 2-Step Verification on your Google account
+      2. Go to https://myaccount.google.com/apppasswords
+      3. Generate an App Password for "Mail"
+      4. Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env
+    """
 
     def __init__(self) -> None:
-        self._service = None
+        self._mail: imaplib.IMAP4_SSL | None = None
 
-    def _authenticate(self) -> None:
-        creds = None
-        if os.path.exists(settings.GMAIL_TOKEN_FILE):
-            creds = Credentials.from_authorized_user_file(
-                settings.GMAIL_TOKEN_FILE, self.SCOPES
-            )
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    settings.GMAIL_CREDENTIALS_FILE, self.SCOPES
-                )
-                creds = flow.run_local_server(port=0)
-            with open(settings.GMAIL_TOKEN_FILE, "w") as token:
-                token.write(creds.to_json())
-        self._service = build("gmail", "v1", credentials=creds)
-
-    @property
-    def service(self):
-        if self._service is None:
-            self._authenticate()
-        return self._service
+    def _connect(self) -> imaplib.IMAP4_SSL:
+        if self._mail is None:
+            self._mail = imaplib.IMAP4_SSL("imap.gmail.com")
+            self._mail.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
+        return self._mail
 
     def fetch_unread_deal_emails(self, label: str = "INBOX") -> list[dict[str, Any]]:
         """Fetch unread emails that look like deal notifications."""
-        query = "is:unread subject:(new deal OR closed won OR new customer)"
-        results = (
-            self.service.users()
-            .messages()
-            .list(userId="me", q=query, labelIds=[label], maxResults=10)
-            .execute()
-        )
-        messages = results.get("messages", [])
+        mail = self._connect()
+        mail.select(label)
+
+        search_criteria = '(UNSEEN SUBJECT "new deal" OR UNSEEN SUBJECT "closed won" OR UNSEEN SUBJECT "new customer")'
+        _, message_ids = mail.search(None, search_criteria)
+
         parsed: list[dict[str, Any]] = []
 
-        for msg_meta in messages:
-            msg = (
-                self.service.users()
-                .messages()
-                .get(userId="me", id=msg_meta["id"], format="full")
-                .execute()
-            )
-            parsed.append(self._extract_email_data(msg))
+        for msg_id in message_ids[0].split():
+            if not msg_id:
+                continue
+            _, msg_data = mail.fetch(msg_id, "(RFC822)")
+            if not msg_data or not msg_data[0]:
+                continue
+
+            raw_email = msg_data[0][1]
+            msg = email.message_from_bytes(raw_email)
+            parsed.append(self._extract_email_data(msg, msg_id.decode()))
 
         log_action(
             agent_name="GmailClient",
             action="fetch_unread_deal_emails",
-            inputs={"query": query, "label": label},
+            inputs={"label": label},
             outputs={"count": len(parsed)},
-            decision_rationale="Polling inbox for new deal notifications",
+            decision_rationale="Polling inbox for new deal notifications via IMAP",
         )
         return parsed
 
-    def _extract_email_data(self, message: dict) -> dict[str, Any]:
-        headers = {h["name"]: h["value"] for h in message["payload"]["headers"]}
-        body = self._get_body(message["payload"])
+    def _extract_email_data(self, msg: email.message.Message, msg_id: str) -> dict[str, Any]:
+        subject = self._decode_header(msg.get("Subject", ""))
+        from_addr = self._decode_header(msg.get("From", ""))
+        date = msg.get("Date", "")
+        body = self._get_body(msg)
+
         return {
-            "message_id": message["id"],
-            "thread_id": message["threadId"],
-            "from": headers.get("From", ""),
-            "subject": headers.get("Subject", ""),
-            "date": headers.get("Date", ""),
+            "message_id": msg_id,
+            "from": from_addr,
+            "subject": subject,
+            "date": date,
             "body": body,
         }
 
-    def _get_body(self, payload: dict) -> str:
-        if payload.get("body", {}).get("data"):
-            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
-        for part in payload.get("parts", []):
-            if part["mimeType"] == "text/plain" and part.get("body", {}).get("data"):
-                return base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+    def _decode_header(self, header: str) -> str:
+        decoded_parts = decode_header(header)
+        parts = []
+        for part, charset in decoded_parts:
+            if isinstance(part, bytes):
+                parts.append(part.decode(charset or "utf-8", errors="replace"))
+            else:
+                parts.append(part)
+        return " ".join(parts)
+
+    def _get_body(self, msg: email.message.Message) -> str:
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload.decode("utf-8", errors="replace")
+        else:
+            payload = msg.get_payload(decode=True)
+            if payload:
+                return payload.decode("utf-8", errors="replace")
         return ""
 
     def mark_as_read(self, message_id: str) -> None:
-        self.service.users().messages().modify(
-            userId="me",
-            id=message_id,
-            body={"removeLabelIds": ["UNREAD"]},
-        ).execute()
+        mail = self._connect()
+        mail.store(message_id, "+FLAGS", "\\Seen")
 
         log_action(
             agent_name="GmailClient",
@@ -108,3 +106,11 @@ class GmailClient:
             outputs={},
             decision_rationale="Marking processed email as read to avoid reprocessing",
         )
+
+    def disconnect(self) -> None:
+        if self._mail:
+            try:
+                self._mail.logout()
+            except Exception:
+                pass
+            self._mail = None

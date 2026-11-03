@@ -8,12 +8,10 @@ load_dotenv()
 
 
 class Settings:
-    # Gmail
-    GMAIL_CREDENTIALS_FILE: str = os.getenv("GMAIL_CREDENTIALS_FILE", "credentials.json")
-    GMAIL_TOKEN_FILE: str = os.getenv("GMAIL_TOKEN_FILE", "token.json")
-    GMAIL_SCOPES: list[str] = ["https://www.googleapis.com/auth/gmail.readonly"]
+    # Gmail (IMAP with App Password)
+    GMAIL_ADDRESS: str = os.getenv("GMAIL_ADDRESS", "")
+    GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "")
     GMAIL_POLL_INTERVAL_SECONDS: int = int(os.getenv("GMAIL_POLL_INTERVAL_SECONDS", "30"))
-    GMAIL_LABEL: str = os.getenv("GMAIL_LABEL", "INBOX")
 
     # Voice AI (Bland.ai)
     BLAND_API_KEY: str = os.getenv("BLAND_API_KEY", "")
