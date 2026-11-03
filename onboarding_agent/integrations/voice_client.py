@@ -81,17 +81,16 @@ class BlandVoiceClient:
                     f"Could you confirm whether they're on the Enterprise plan or the Growth plan?"
                 ),
                 "model": {
-                    "provider": "groq",
-                    "model": settings.GROQ_MODEL,
+                    "provider": "openai",
+                    "model": "gpt-4.1",
                     "messages": [{"role": "system", "content": prompt}],
                 },
                 "voice": {
-                    "provider": "11labs",
-                    "voiceId": "sarah",
+                    "provider": "vapi",
+                    "voiceId": "Elliot",
                 },
             }
 
-            # Update phone number to use this assistant
             resp = requests.patch(
                 f"{self.base_url}/phone-number/{settings.VAPI_PHONE_ID}",
                 json={"assistantId": None, "assistant": assistant_config},
@@ -99,11 +98,14 @@ class BlandVoiceClient:
                 timeout=15,
             )
 
+            if resp.status_code not in (200, 201):
+                print(f"  Vapi setup error: {resp.text[:300]}")
+
             log_action(
                 agent_name="VoiceClient",
                 action="inbound_setup",
                 inputs={"ae_name": ae_name, "customer_name": customer_name, "vapi_number": vapi_number},
-                outputs={"status": resp.status_code},
+                outputs={"status": resp.status_code, "response": resp.text[:200]},
                 decision_rationale=f"Configured Vapi number for inbound call from AE",
             )
 
@@ -199,13 +201,13 @@ class BlandVoiceClient:
                     f"Could you confirm whether they're on the Enterprise plan or the Growth plan?"
                 ),
                 "model": {
-                    "provider": "groq",
-                    "model": settings.GROQ_MODEL,
+                    "provider": "openai",
+                    "model": "gpt-4.1",
                     "messages": [{"role": "system", "content": prompt}],
                 },
                 "voice": {
-                    "provider": "11labs",
-                    "voiceId": "sarah",
+                    "provider": "vapi",
+                    "voiceId": "Elliot",
                 },
             },
             "phoneNumberId": settings.VAPI_PHONE_ID,
