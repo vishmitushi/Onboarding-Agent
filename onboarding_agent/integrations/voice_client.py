@@ -199,78 +199,48 @@ class BlandVoiceClient:
   <div id="status" class="status">Ready — click Start Call to begin</div>
 
   <div style="margin: 24px 0;">
-    <button id="startBtn" onclick="startCall()">Start Call</button>
-    <button id="endBtn" onclick="endCall()">End Call</button>
+    <button id="startBtn" disabled>Loading SDK...</button>
   </div>
 
   <div class="instructions">
     <strong>Instructions:</strong><br>
-    1. Click "Start Call" and allow microphone access<br>
-    2. The AI will ask about the plan tier for {customer_name}<br>
-    3. Say <strong>"Enterprise"</strong> or <strong>"Growth"</strong><br>
-    4. Confirm when the AI repeats your choice<br>
-    5. Click "End Call" when finished
+    1. Click the green <strong>phone button</strong> (bottom-right corner)<br>
+    2. Allow microphone access when prompted<br>
+    3. The AI will ask about the plan tier for {customer_name}<br>
+    4. Say <strong>"Enterprise"</strong> or <strong>"Growth"</strong><br>
+    5. Confirm when the AI repeats your choice<br>
+    6. Click the red button to end the call
   </div>
 </div>
 
-<script type="module">
-  import Vapi from 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.2.5/+esm';
+<script>
+  var assistant = '{assistant_id}';
+  var apiKey = '{public_key}';
 
-  let vapiInstance = null;
-  const statusEl = document.getElementById('status');
-  const startBtn = document.getElementById('startBtn');
-  const endBtn = document.getElementById('endBtn');
-
-  window.startCall = async function() {{
-    startBtn.disabled = true;
-    statusEl.textContent = 'Connecting...';
-
-    try {{
-      vapiInstance = new Vapi('{public_key}');
-
-      vapiInstance.on('call-start', () => {{
-        statusEl.textContent = 'Connected! Speak now...';
-        statusEl.className = 'status active pulse';
-        endBtn.style.display = 'inline-block';
+  (function (d, t) {{
+    var g = d.createElement(t), s = d.getElementsByTagName(t)[0];
+    g.src = 'https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js';
+    g.defer = true;
+    g.async = true;
+    s.parentNode.insertBefore(g, s);
+    g.onload = function () {{
+      document.getElementById('status').textContent = 'SDK loaded — click the phone button (bottom-right) to start!';
+      document.getElementById('startBtn').style.display = 'none';
+      window.vapiSDK.run({{
+        apiKey: apiKey,
+        assistant: assistant,
+        config: {{
+          position: 'bottom-right',
+          offset: '40px',
+          width: '50px',
+          height: '50px',
+          idle: {{ color: 'rgb(34, 197, 94)', type: 'pill', title: 'Start Call', subtitle: 'Talk to AI', icon: 'https://unpkg.com/lucide-static@0.321.0/icons/phone.svg' }},
+          loading: {{ color: 'rgb(234, 179, 8)', type: 'pill', title: 'Connecting...', subtitle: 'Please wait', icon: 'https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg' }},
+          active: {{ color: 'rgb(239, 68, 68)', type: 'pill', title: 'End Call', subtitle: 'Click to stop', icon: 'https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg' }},
+        }}
       }});
-
-      vapiInstance.on('call-end', () => {{
-        statusEl.textContent = 'Call ended. You can close this tab.';
-        statusEl.className = 'status ended';
-        endBtn.style.display = 'none';
-        startBtn.style.display = 'none';
-      }});
-
-      vapiInstance.on('speech-start', () => {{
-        statusEl.textContent = 'AI is speaking...';
-      }});
-
-      vapiInstance.on('speech-end', () => {{
-        statusEl.textContent = 'Your turn — speak now...';
-      }});
-
-      vapiInstance.on('error', (e) => {{
-        console.error('Vapi error:', e);
-        statusEl.textContent = 'Error: ' + (e.message || JSON.stringify(e));
-        statusEl.className = 'status';
-        startBtn.disabled = false;
-        endBtn.style.display = 'none';
-      }});
-
-      await vapiInstance.start('{assistant_id}');
-
-    }} catch (err) {{
-      console.error('Start failed:', err);
-      statusEl.textContent = 'Failed to start: ' + err.message;
-      startBtn.disabled = false;
-    }}
-  }};
-
-  window.endCall = function() {{
-    if (vapiInstance) {{
-      vapiInstance.stop();
-    }}
-  }};
+    }};
+  }})(document, 'script');
 </script>
 </body>
 </html>"""
