@@ -280,7 +280,7 @@ class IntakeAgent:
             outputs={},
             decision_rationale=(
                 f"All validations passed. Creating project with "
-                f"{'template ' + template_id if template_id else 'default settings'}"
+                f"{'template ' + str(template_id) if template_id else 'default settings'}"
             ),
         )
 
