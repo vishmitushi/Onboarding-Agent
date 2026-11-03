@@ -840,7 +840,9 @@ class BlandVoiceClient:
 
         # Score plan tier from USER's words only (AI mentions both plans in its question)
         user_text = " ".join(user_text_parts).lower() if user_text_parts else ""
-        score_text = user_text if user_text else transcript.lower()
+        # Only fall back to full transcript if no messages array was available
+        # (e.g. Bland.ai which returns a flat transcript, not per-role messages)
+        score_text = user_text if user_text else ""
 
         print(f"  [DEBUG] Transcript ({len(transcript)} chars): {transcript[:300]}")
         print(f"  [DEBUG] User said: {user_text[:200]}")

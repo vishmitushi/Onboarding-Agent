@@ -142,6 +142,49 @@ class SlackClient:
             f"This channel is your go-to place for all onboarding questions!"
         )
 
+    def post_overdue_alert(self, channel_id: str, escalations: dict) -> None:
+        """Post overdue task alerts to a Slack channel.
+
+        Args:
+            channel_id: The Slack channel to post in (e.g. the onboarding channel)
+            escalations: {"notify_pm": [...], "notify_owner": [...]} from RocketlaneClient
+        """
+        pm_tasks = escalations.get("notify_pm", [])
+        owner_tasks = escalations.get("notify_owner", [])
+
+        if not pm_tasks and not owner_tasks:
+            return
+
+        lines = [":rotating_light: *Overdue Task Alert*\n"]
+
+        if owner_tasks:
+            lines.append("*:red_circle: ESCALATION — Owner notification (4+ days overdue):*")
+            for task in owner_tasks:
+                name = task.get("name", task.get("taskName", "Unnamed"))
+                days = task.get("_days_overdue", "?")
+                lines.append(f"  • *{name}* — {days} days overdue")
+            lines.append("")
+
+        if pm_tasks:
+            lines.append("*:warning: PM notification (1-3 days overdue):*")
+            for task in pm_tasks:
+                name = task.get("name", task.get("taskName", "Unnamed"))
+                days = task.get("_days_overdue", "?")
+                lines.append(f"  • *{name}* — {days} days overdue")
+            lines.append("")
+
+        lines.append("_Please update task status or reassign as needed._")
+
+        self._post_message(channel_id, "\n".join(lines))
+
+        log_action(
+            agent_name="SlackClient",
+            action="overdue_alert_posted",
+            inputs={"channel_id": channel_id},
+            outputs={"pm_tasks": len(pm_tasks), "owner_tasks": len(owner_tasks)},
+            decision_rationale=f"Posted overdue alert: {len(pm_tasks)} PM + {len(owner_tasks)} Owner",
+        )
+
     @staticmethod
     def _sanitize_channel_name(name: str) -> str:
         name = name.lower().strip()

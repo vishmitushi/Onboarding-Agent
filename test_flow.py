@@ -8,6 +8,8 @@ Run individual steps to test each integration:
     python test_flow.py --step 4     # Test email parsing (LLM)
     python test_flow.py --step 5     # Test Slack channel creation
     python test_flow.py --step 6     # Test full happy path (all integrations)
+    python test_flow.py --step 7     # Test Gmail IMAP connection
+    python test_flow.py --step 8     # Test overdue task escalation
     python test_flow.py --step all   # Run all steps sequentially
 """
 from __future__ import annotations
@@ -383,93 +385,54 @@ def step5_slack():
     return False
 
 
-# ── Step 6: Full Happy Path ─────────────────────────────────────────
+# ── Step 6: Full Happy Path (Direct Agent Calls, No LangGraph) ─────
 
 def step6_full_flow():
-    header(6, "Full Happy Path (Simulated)")
+    header(6, "Full Happy Path — Direct Agent Calls (no LangGraph)")
 
-    from unittest.mock import MagicMock
     from onboarding_agent.agents.intake_agent import IntakeAgent
     from onboarding_agent.agents.communication_agent import CommunicationAgent
-    from onboarding_agent.models import (
-        OnboardingProject, PlanTier, VoiceCallResult, SlackChannel,
-    )
     from onboarding_agent.guardrails import get_audit_trail, clear_audit_trail, export_audit_trail
 
     clear_audit_trail()
 
-    # Mock voice client (so we don't make a real call)
-    voice_mock = MagicMock()
-    voice_mock.call_ae_for_plan_confirmation.return_value = VoiceCallResult(
-        call_id="test_call_001",
-        status="completed",
-        plan_tier=PlanTier.ENTERPRISE,
-        confidence=0.95,
-        transcript="Yes, Acme Corp is on the Enterprise plan. That's correct.",
-        duration_seconds=42.0,
-    )
-
-    # Mock Rocketlane (or use real if API key is set)
-    rocketlane_mock = MagicMock()
-    rocketlane_mock.check_existing_projects.return_value = []
-    rocketlane_mock.get_template_id.return_value = "tpl_001"
-    rocketlane_mock.create_project.return_value = OnboardingProject(
-        project_id="proj_001",
-        project_name="Acme Corp - Onboarding",
-        customer_name="Acme Corp",
-        plan_tier=PlanTier.ENTERPRISE,
-        template_name="Enterprise Onboarding - 30 Day",
-        duration_days=30,
-        csm_type="dedicated",
-    )
-
-    # Mock Slack
-    slack_mock = MagicMock()
-    slack_mock.create_onboarding_channel.return_value = SlackChannel(
-        channel_id="C_MOCK",
-        channel_name="onb-acme-corp-enterprise",
-        topic="Onboarding: Acme Corp | Plan: Enterprise | Duration: 30 days",
-        welcome_message="Welcome!",
-        customer_name="Acme Corp",
-        plan_tier=PlanTier.ENTERPRISE,
-    )
-
-    intake = IntakeAgent(
-        voice_client=voice_mock,
-        rocketlane_client=rocketlane_mock,
-    )
-    comms = CommunicationAgent(slack_client=slack_mock)
+    intake = IntakeAgent()
+    comms = CommunicationAgent()
 
     sample_email = {
         "message_id": "flow_test_001",
         "from": "john.smith@novacrm.com",
         "subject": "New Deal Closed - Acme Corp",
         "body": (
+            "Hi CS Team,\n\n"
+            "Great news! We just closed a new deal with Acme Corp.\n\n"
             "Customer Name: Acme Corp\n"
             "Customer Contact: jane.doe@acmecorp.com\n"
             "AE: John Smith\n"
             "AE Phone: +1-555-123-4567\n"
-            "Salesforce Opportunity: https://novacrm.salesforce.com/opportunity/006ABC\n"
+            "Salesforce Opportunity: https://novacrm.salesforce.com/opportunity/006ABC123\n\n"
+            "Please kick off the onboarding process.\n\n"
+            "Thanks,\nJohn"
         ),
     }
 
-    info("Step 6.1 — Parsing email with LLM...")
+    info("Step 6.1 — Parsing email with Groq LLM...")
     deal = intake.parse_email(sample_email)
     if deal:
-        success(f"Parsed: {deal.customer_name} / {deal.ae_name}")
+        success(f"Parsed: {deal.customer_name} / {deal.ae_name} / {deal.customer_contact_email}")
     else:
         fail("Email parsing failed")
         return False
 
-    info("Step 6.2 — Voice call to confirm plan tier...")
+    info("Step 6.2 — Voice call to confirm plan tier (Vapi web call)...")
     call_result = intake.confirm_plan_tier(deal)
     if call_result and call_result.plan_tier:
-        success(f"Confirmed: {call_result.plan_tier.value} ({call_result.confidence:.0%})")
+        success(f"Confirmed: {call_result.plan_tier.value} (confidence: {call_result.confidence:.0%})")
     else:
-        fail("Voice confirmation failed")
+        fail("Voice confirmation failed or confidence too low")
         return False
 
-    info("Step 6.3 — Creating Rocketlane project...")
+    info(f"Step 6.3 — Creating Rocketlane project ({call_result.plan_tier.value})...")
     project = intake.create_project(deal, call_result.plan_tier)
     if project:
         success(f"Project: {project.project_name} (ID: {project.project_id})")
@@ -482,18 +445,132 @@ def step6_full_flow():
     if channel:
         success(f"Channel: #{channel.channel_name}")
     else:
-        fail("Slack channel failed")
+        warn("Slack channel failed (non-blocking)")
 
-    # Audit trail
     trail = get_audit_trail()
-    trail_path = export_audit_trail("logs/test_flow_audit.json")
-    info(f"\nAudit trail: {len(trail)} entries exported to {trail_path}")
+    trail_path = export_audit_trail("logs/test_flow_step6_audit.json")
+    info(f"\nAudit trail: {len(trail)} entries → {trail_path}")
     for entry in trail:
-        status = green("OK") if entry.success else red("FAIL")
-        print(f"    {entry.timestamp.strftime('%H:%M:%S')} | {entry.agent_name:20s} | {entry.action:30s} | {status}")
+        st = green("OK") if entry.success else red("FAIL")
+        print(f"    {entry.timestamp.strftime('%H:%M:%S')} | {entry.agent_name:20s} | {entry.action:30s} | {st}")
 
-    print(f"\n{green(bold('  FULL HAPPY PATH COMPLETE!'))}\n")
+    print(f"\n{green(bold('  STEP 6 COMPLETE'))}\n")
     return True
+
+
+# ── Step 9: Full LangGraph Workflow + Gmail ───────────────────────────
+
+def step9_langgraph_flow():
+    header(9, "Full LangGraph Workflow + Gmail Trigger (LIVE)")
+
+    from onboarding_agent.graph.workflow import onboarding_workflow
+    from onboarding_agent.graph.nodes import set_agents
+    from onboarding_agent.agents.intake_agent import IntakeAgent
+    from onboarding_agent.agents.communication_agent import CommunicationAgent
+    from onboarding_agent.guardrails import get_audit_trail, clear_audit_trail, export_audit_trail
+
+    clear_audit_trail()
+    set_agents(IntakeAgent(), CommunicationAgent())
+
+    # ── Fetch real email from Gmail ──
+    gmail_address = os.getenv("GMAIL_ADDRESS", "")
+    gmail_password = os.getenv("GMAIL_APP_PASSWORD", "")
+
+    raw_email = None
+    if gmail_address and gmail_password:
+        info("Checking Gmail for unread deal emails...")
+        try:
+            from onboarding_agent.integrations.gmail_client import GmailClient
+            gmail = GmailClient()
+            emails = gmail.fetch_unread_deal_emails()
+            if emails:
+                raw_email = emails[0]
+                success(f"Using real email: \"{raw_email.get('subject', '')}\"")
+                gmail.disconnect()
+            else:
+                warn("No unread deal emails found — using sample email instead")
+                info("To use a real email: send yourself an email with subject containing 'new deal'")
+                gmail.disconnect()
+        except Exception as e:
+            warn(f"Gmail connection failed: {e} — using sample email instead")
+
+    if raw_email is None:
+        raw_email = {
+            "message_id": "sample_001",
+            "from": "john.smith@novacrm.com",
+            "subject": "New Deal Closed - Acme Corp",
+            "body": (
+                "Hi CS Team,\n\n"
+                "Great news! We just closed a new deal with Acme Corp.\n\n"
+                "Customer Name: Acme Corp\n"
+                "Customer Contact: jane.doe@acmecorp.com\n"
+                "AE: John Smith\n"
+                "AE Phone: +1-555-123-4567\n"
+                "Salesforce Opportunity: https://novacrm.salesforce.com/opportunity/006ABC123\n\n"
+                "Please kick off the onboarding process.\n\n"
+                "Thanks,\nJohn"
+            ),
+        }
+        info("Using sample deal email")
+
+    info("\nInvoking LangGraph workflow: onboarding_workflow.invoke()")
+    info("Graph: parse_email → call_ae → validate_voice → check_duplicate → create_project → create_slack_channel")
+    info("A browser page will open for the voice call — say 'Enterprise' or 'Growth'.\n")
+
+    try:
+        final_state = onboarding_workflow.invoke({"raw_email": raw_email})
+    except Exception as e:
+        fail(f"Workflow crashed: {e}")
+        return False
+
+    # ── Display results ──
+    status = final_state.get("status", "unknown")
+    error = final_state.get("error", "")
+
+    print(f"\n{'='*60}")
+    if status == "completed":
+        print(green(bold("  LANGGRAPH WORKFLOW — COMPLETED SUCCESSFULLY")))
+    elif status == "escalated":
+        print(yellow(bold("  LANGGRAPH WORKFLOW — ESCALATED TO HUMAN")))
+    else:
+        print(red(bold(f"  LANGGRAPH WORKFLOW — STATUS: {status}")))
+    print(f"{'='*60}\n")
+
+    deal_data = final_state.get("deal_data")
+    if deal_data:
+        success(f"Email parsed: {deal_data['customer_name']} / {deal_data['ae_name']}")
+    else:
+        fail("Email parsing failed")
+
+    plan_tier = final_state.get("plan_tier")
+    voice_result = final_state.get("voice_result")
+    if plan_tier:
+        confidence = voice_result.get("confidence", 0) if voice_result else 0
+        success(f"Plan confirmed: {plan_tier} (confidence: {confidence:.0%})")
+    elif voice_result:
+        warn(f"Voice call done but plan not confirmed (attempts: {final_state.get('voice_attempts', 0)})")
+
+    project_data = final_state.get("project_data")
+    if project_data:
+        success(f"Project created: {project_data['project_name']} (ID: {project_data['project_id']})")
+        info(f"  Plan: {project_data['plan_tier']} | Duration: {project_data['duration_days']} days | CSM: {project_data['csm_type']}")
+
+    slack_data = final_state.get("slack_channel_data")
+    if slack_data:
+        success(f"Slack channel: #{slack_data['channel_name']}")
+
+    if error:
+        info(f"  Note: {error}")
+
+    trail = get_audit_trail()
+    trail_path = export_audit_trail("logs/test_flow_langgraph_audit.json")
+    info(f"\nAudit trail: {len(trail)} entries → {trail_path}")
+    for entry in trail:
+        st = green("OK") if entry.success else red("FAIL")
+        print(f"    {entry.timestamp.strftime('%H:%M:%S')} | {entry.agent_name:20s} | {entry.action:30s} | {st}")
+
+    print()
+    return status == "completed"
 
 
 # ── Main ────────────────────────────────────────────────────────────
@@ -546,14 +623,82 @@ def step7_gmail():
         return False
 
 
+def step8_overdue_check():
+    header(8, "Overdue Task Escalation Check")
+
+    api_key = os.getenv("ROCKETLANE_API_KEY", "")
+    if not api_key:
+        fail("ROCKETLANE_API_KEY not set in .env")
+        return False
+
+    from onboarding_agent.integrations.rocketlane_client import RocketlaneClient
+
+    client = RocketlaneClient()
+
+    info("Fetching all projects from Rocketlane...")
+    try:
+        projects = client.list_projects()
+        if not projects:
+            warn("No projects found in Rocketlane — create one first (step 2 or step 6)")
+            return True
+
+        success(f"Found {len(projects)} project(s)")
+
+        for proj in projects[:5]:
+            project_id = proj.get("id", proj.get("projectId", ""))
+            project_name = proj.get("projectName", proj.get("name", "Unknown"))
+            info(f"\n  Checking: {project_name} (ID: {project_id})")
+
+            try:
+                escalations = client.check_overdue_escalations(str(project_id))
+                pm_tasks = escalations["notify_pm"]
+                owner_tasks = escalations["notify_owner"]
+
+                if not pm_tasks and not owner_tasks:
+                    success(f"  No overdue tasks!")
+                else:
+                    if owner_tasks:
+                        for t in owner_tasks:
+                            name = t.get("name", t.get("taskName", "Unnamed"))
+                            days = t.get("_days_overdue", "?")
+                            fail(f"  OWNER ESCALATION: {name} — {days} days overdue")
+                    if pm_tasks:
+                        for t in pm_tasks:
+                            name = t.get("name", t.get("taskName", "Unnamed"))
+                            days = t.get("_days_overdue", "?")
+                            warn(f"  PM NOTIFICATION:  {name} — {days} days overdue")
+
+                    # Post to Slack if token is set
+                    slack_token = os.getenv("SLACK_BOT_TOKEN", "")
+                    if slack_token and (pm_tasks or owner_tasks):
+                        from onboarding_agent.integrations.slack_client import SlackClient
+                        slack = SlackClient()
+                        try:
+                            slack.post_overdue_alert("general", escalations)
+                            success(f"  Slack alert posted to #general")
+                        except Exception as e:
+                            warn(f"  Slack alert failed: {e}")
+
+            except Exception as e:
+                warn(f"  Could not check tasks: {e}")
+
+        return True
+
+    except Exception as e:
+        fail(f"Failed to fetch projects: {e}")
+        return False
+
+
 STEPS = {
     "1": ("Rocketlane API Connection", step1_rocketlane_connection),
     "2": ("Rocketlane Project Creation", step2_rocketlane_create_project),
     "3": ("Voice AI Call", step3_voice_call),
     "4": ("Email Parsing (LLM)", step4_email_parsing),
     "5": ("Slack Channel", step5_slack),
-    "6": ("Full Happy Path", step6_full_flow),
+    "6": ("Full Happy Path (Direct)", step6_full_flow),
     "7": ("Gmail IMAP Connection", step7_gmail),
+    "8": ("Overdue Task Escalation", step8_overdue_check),
+    "9": ("LangGraph Workflow + Gmail", step9_langgraph_flow),
 }
 
 def main():
@@ -569,6 +714,8 @@ def main():
 
     if args.step == "all":
         for num, (_, fn) in STEPS.items():
+            if num in ("8", "9"):
+                continue
             fn()
     elif args.step in STEPS:
         STEPS[args.step][1]()

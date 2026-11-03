@@ -139,3 +139,65 @@ class RocketlaneClient:
             for p in projects
             if customer_name.lower() in p.get("name", "").lower()
         ]
+
+    def list_tasks(self, project_id: str) -> list[dict[str, Any]]:
+        data = self._request("GET", f"/projects/{project_id}/tasks")
+        return data.get("data", data.get("tasks", []))
+
+    def get_overdue_tasks(self, project_id: str) -> list[dict[str, Any]]:
+        """Fetch tasks and filter for overdue ones with days overdue count."""
+        tasks = self.list_tasks(project_id)
+        today = datetime.now(timezone.utc).date()
+        overdue = []
+
+        for task in tasks:
+            due_str = task.get("dueDate") or task.get("endDate") or ""
+            status = (task.get("status") or "").lower()
+            if not due_str or status in ("completed", "done", "closed"):
+                continue
+
+            try:
+                due_date = datetime.fromisoformat(due_str.replace("Z", "+00:00")).date()
+            except (ValueError, TypeError):
+                continue
+
+            days_overdue = (today - due_date).days
+            if days_overdue > 0:
+                task["_days_overdue"] = days_overdue
+                overdue.append(task)
+
+        return overdue
+
+    def check_overdue_escalations(self, project_id: str) -> dict[str, list[dict]]:
+        """Check for overdue tasks and categorize by escalation level.
+
+        Returns:
+            {"notify_pm": [...], "notify_owner": [...]}
+            - notify_pm: tasks overdue by 1+ days (PM notification)
+            - notify_owner: tasks overdue by 4+ days (Owner escalation)
+        """
+        overdue = self.get_overdue_tasks(project_id)
+
+        result: dict[str, list[dict]] = {"notify_pm": [], "notify_owner": []}
+        for task in overdue:
+            days = task["_days_overdue"]
+            if days >= 4:
+                result["notify_owner"].append(task)
+            elif days >= 1:
+                result["notify_pm"].append(task)
+
+        log_action(
+            agent_name="RocketlaneClient",
+            action="overdue_check",
+            inputs={"project_id": project_id},
+            outputs={
+                "total_overdue": len(overdue),
+                "notify_pm": len(result["notify_pm"]),
+                "notify_owner": len(result["notify_owner"]),
+            },
+            decision_rationale=(
+                f"Found {len(overdue)} overdue task(s): "
+                f"{len(result['notify_pm'])} for PM, {len(result['notify_owner'])} for Owner"
+            ),
+        )
+        return result
