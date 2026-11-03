@@ -35,6 +35,8 @@ class Settings:
         "ROCKETLANE_API_URL", "https://api.rocketlane.com/api/1.0"
     )
     ROCKETLANE_VERIFY_SSL: bool = os.getenv("ROCKETLANE_VERIFY_SSL", "true").lower() != "false"
+    ROCKETLANE_ENTERPRISE_TEMPLATE_ID: str = "5000000110565"
+    ROCKETLANE_GROWTH_TEMPLATE_ID: str = "5000000110566"
 
     # Slack
     SLACK_BOT_TOKEN: str = os.getenv("SLACK_BOT_TOKEN", "")

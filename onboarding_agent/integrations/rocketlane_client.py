@@ -44,29 +44,68 @@ class RocketlaneClient:
         return resp.json() if resp.content else {}
 
     def list_templates(self) -> list[dict[str, Any]]:
-        data = self._request("GET", "/templates")
-        return data.get("data", data.get("templates", []))
+        endpoints = ["/templates", "/projects/templates", "/project-templates", "/templates/projects"]
+        for ep in endpoints:
+            try:
+                data = self._request("GET", ep)
+                templates = data if isinstance(data, list) else data.get("data", data.get("templates", data.get("results", [])))
+                if templates:
+                    log_action(
+                        agent_name="RocketlaneClient",
+                        action="templates_listed",
+                        inputs={"endpoint": ep},
+                        outputs={"count": len(templates), "names": [t.get("name", "") for t in templates]},
+                        decision_rationale=f"Found {len(templates)} template(s) via {ep}",
+                    )
+                    return templates
+            except requests.RequestException:
+                continue
+        raise requests.ConnectionError("No working templates endpoint found")
 
     def get_template_id(self, plan_tier: PlanTier) -> int | None:
-        """Find the template matching the plan tier."""
+        """Find the template matching the plan tier.
+
+        Priority: API lookup by name → .env configured ID as fallback.
+        """
         config = PLAN_TIER_CONFIG[plan_tier]
         template_name = config["template_name"]
         try:
             templates = self.list_templates()
+            for tpl in templates:
+                if template_name.lower() in tpl.get("name", "").lower():
+                    tid = tpl.get("templateId", tpl.get("id"))
+                    if tid is not None:
+                        log_action(
+                            agent_name="RocketlaneClient",
+                            action="template_found",
+                            inputs={"plan_tier": plan_tier.value, "template_name": template_name},
+                            outputs={"template_id": tid},
+                            decision_rationale=f"Matched template '{template_name}' → ID {tid}",
+                        )
+                        return int(tid)
         except requests.RequestException as e:
             log_action(
                 agent_name="RocketlaneClient",
-                action="template_lookup_skipped",
+                action="template_api_failed",
                 inputs={"plan_tier": plan_tier.value},
                 outputs={"error": str(e)},
-                decision_rationale="Templates API unavailable; project will be created without a template source",
+                decision_rationale="Templates API failed; checking .env fallback",
             )
-            return None
 
-        for tpl in templates:
-            if template_name.lower() in tpl.get("name", "").lower():
-                tid = tpl.get("templateId", tpl.get("id"))
-                return int(tid) if tid is not None else None
+        env_id = (
+            settings.ROCKETLANE_ENTERPRISE_TEMPLATE_ID if plan_tier == PlanTier.ENTERPRISE
+            else settings.ROCKETLANE_GROWTH_TEMPLATE_ID
+        )
+        if env_id:
+            log_action(
+                agent_name="RocketlaneClient",
+                action="template_from_config",
+                inputs={"plan_tier": plan_tier.value, "template_id": env_id},
+                outputs={},
+                decision_rationale=f"Using .env fallback template ID {env_id} for {plan_tier.value}",
+            )
+            return int(env_id)
+
         return None
 
     def list_projects(self) -> list[dict[str, Any]]:
@@ -97,12 +136,6 @@ class RocketlaneClient:
             payload["owner"] = {"emailId": owner_email}
             payload["autoAssignOwner"] = True
 
-        if template_id is not None:
-            payload["sources"] = [{
-                "templateId": int(template_id),
-                "startDate": start_date,
-            }]
-
         log_action(
             agent_name="RocketlaneClient",
             action="create_project",
@@ -110,7 +143,6 @@ class RocketlaneClient:
                 "customer_name": customer_name,
                 "plan_tier": plan_tier.value,
                 "template_id": template_id,
-                "payload": payload,
             },
             outputs={},
             decision_rationale=(
@@ -122,6 +154,27 @@ class RocketlaneClient:
         try:
             data = self._request("POST", "/projects", payload)
             project_id = data.get("id", data.get("projectId", ""))
+
+            if template_id is not None:
+                try:
+                    self.import_template(str(project_id), int(template_id))
+                    log_action(
+                        agent_name="RocketlaneClient",
+                        action="template_imported",
+                        inputs={"project_id": str(project_id), "template_id": template_id},
+                        outputs={},
+                        decision_rationale=f"Imported template {template_id} into project {project_id}",
+                    )
+                except requests.RequestException as e:
+                    log_action(
+                        agent_name="RocketlaneClient",
+                        action="template_import_failed",
+                        inputs={"project_id": str(project_id), "template_id": template_id},
+                        outputs={},
+                        success=False,
+                        error_message=str(e),
+                        decision_rationale="Template import failed; project created without template",
+                    )
 
             project = OnboardingProject(
                 project_id=str(project_id),
