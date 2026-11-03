@@ -35,7 +35,12 @@ class RocketlaneClient:
             method, url, json=payload, headers=self.headers, timeout=30,
             verify=settings.ROCKETLANE_VERIFY_SSL,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            body = resp.text[:500] if resp.text else "(empty)"
+            raise requests.HTTPError(
+                f"{resp.status_code} {resp.reason} for {method} {endpoint}: {body}",
+                response=resp,
+            )
         return resp.json() if resp.content else {}
 
     def list_templates(self) -> list[dict[str, Any]]:
@@ -86,7 +91,7 @@ class RocketlaneClient:
             "owner": {
                 "emailId": settings.ESCALATION_EMAIL,
             },
-            "assignProjectOwner": True,
+            "autoAssignOwner": True,
         }
 
         if template_id:
