@@ -148,17 +148,25 @@ def step3_voice_call():
 
     provider = os.getenv("VOICE_PROVIDER", "vapi")
 
-    if provider in ("vapi", "vapi_inbound", "vapi_outbound"):
+    if provider in ("vapi", "vapi_web", "vapi_inbound", "vapi_outbound"):
         api_key = os.getenv("VAPI_API_KEY", "")
-        phone_id = os.getenv("VAPI_PHONE_ID", "")
         if not api_key:
             fail("VAPI_API_KEY not set in .env")
             return False
-        if not phone_id:
-            fail("VAPI_PHONE_ID not set in .env")
-            return False
         info(f"Vapi.ai API key found: {api_key[:8]}...")
-        info(f"Phone Number ID: {phone_id[:8]}...")
+        if provider in ("vapi", "vapi_web"):
+            public_key = os.getenv("VAPI_PUBLIC_KEY", "")
+            if not public_key:
+                fail("VAPI_PUBLIC_KEY not set in .env")
+                info("Get it from: https://dashboard.vapi.ai → Account → Public Key")
+                return False
+            info(f"Vapi public key found: {public_key[:8]}...")
+        else:
+            phone_id = os.getenv("VAPI_PHONE_ID", "")
+            if not phone_id:
+                fail("VAPI_PHONE_ID not set in .env")
+                return False
+            info(f"Phone Number ID: {phone_id[:8]}...")
     else:
         api_key = os.getenv("BLAND_API_KEY", "")
         if not api_key:
@@ -169,7 +177,17 @@ def step3_voice_call():
     from onboarding_agent.integrations.voice_client import BlandVoiceClient
     client = BlandVoiceClient()
 
-    if provider == "vapi_inbound":
+    if provider in ("vapi", "vapi_web"):
+        # Web mode: browser-based call (no phone needed)
+        info(f"Mode: Web Call — a browser page will open for voice chat")
+        info(f"Allow microphone access and talk to the AI.\n")
+
+        result = client.call_ae_for_plan_confirmation(
+            ae_phone="web",
+            ae_name="Test AE",
+            customer_name="Acme Corp",
+        )
+    elif provider == "vapi_inbound":
         # Inbound mode: AE calls our Vapi number
         vapi_number = os.getenv("VAPI_PHONE_NUMBER", "")
         if not vapi_number:

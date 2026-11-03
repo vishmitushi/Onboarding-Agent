@@ -18,6 +18,7 @@ class Settings:
 
     # Vapi.ai (free credits, voice AI)
     VAPI_API_KEY: str = os.getenv("VAPI_API_KEY", "")
+    VAPI_PUBLIC_KEY: str = os.getenv("VAPI_PUBLIC_KEY", "")
     VAPI_PHONE_ID: str = os.getenv("VAPI_PHONE_ID", "")
     VAPI_PHONE_NUMBER: str = os.getenv("VAPI_PHONE_NUMBER", "")
 

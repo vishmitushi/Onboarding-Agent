@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import time
+import webbrowser
 
 import requests
 
@@ -12,7 +14,8 @@ from onboarding_agent.models import PlanTier, VoiceCallResult
 class BlandVoiceClient:
     """Voice AI client for plan tier confirmation calls.
 
-    Supports two modes:
+    Supports multiple modes:
+      - "vapi_web"      → AE talks via browser (no phone needed, works internationally)
       - "vapi_inbound"  → AE calls the Vapi number, AI asks for plan tier
       - "vapi_outbound" → System calls the AE via Vapi (requires Twilio number)
       - "bland"         → System calls AE via Bland.ai (US/Canada only)
@@ -20,7 +23,7 @@ class BlandVoiceClient:
 
     def __init__(self) -> None:
         self.provider = settings.VOICE_PROVIDER
-        if self.provider in ("vapi", "vapi_inbound", "vapi_outbound"):
+        if self.provider in ("vapi", "vapi_web", "vapi_inbound", "vapi_outbound"):
             self.api_key = settings.VAPI_API_KEY
             self.base_url = "https://api.vapi.ai"
             self.headers = {
@@ -41,9 +44,11 @@ class BlandVoiceClient:
         ae_name: str,
         customer_name: str,
     ) -> VoiceCallResult:
+        if self.provider in ("vapi", "vapi_web"):
+            return self._vapi_web(ae_phone, ae_name, customer_name)
         if self.provider in ("vapi_inbound",):
             return self._vapi_inbound(ae_phone, ae_name, customer_name)
-        if self.provider in ("vapi", "vapi_outbound"):
+        if self.provider in ("vapi_outbound",):
             return self._vapi_outbound(ae_phone, ae_name, customer_name)
         return self._call_bland(ae_phone, ae_name, customer_name)
 
@@ -65,6 +70,298 @@ class BlandVoiceClient:
             f"Thank them and end the call."
         )
 
+    # ── Vapi Web Call (browser-based, no phone needed) ──────────────────
+
+    def _vapi_web(self, ae_phone: str, ae_name: str, customer_name: str) -> VoiceCallResult:
+        """Create assistant, open browser page for web-based voice call, poll for result."""
+        prompt = self._build_system_prompt(ae_name, customer_name)
+
+        # Step 1: Create a dedicated assistant
+        assistant_payload = {
+            "name": f"NovaCRM Onboarding - {customer_name}",
+            "firstMessage": (
+                f"Hi! This is NovaCRM's onboarding assistant. "
+                f"I understand we're discussing the new deal for {customer_name}. "
+                f"Could you confirm whether they're on the Enterprise plan or the Growth plan?"
+            ),
+            "model": {
+                "provider": "openai",
+                "model": "gpt-4.1",
+                "messages": [{"role": "system", "content": prompt}],
+            },
+            "voice": {
+                "provider": "vapi",
+                "voiceId": "Elliot",
+            },
+        }
+
+        try:
+            resp = requests.post(
+                f"{self.base_url}/assistant",
+                json=assistant_payload,
+                headers=self.headers,
+                timeout=15,
+            )
+            if resp.status_code not in (200, 201):
+                print(f"  Vapi assistant creation error: {resp.text[:300]}")
+                resp.raise_for_status()
+
+            assistant_data = resp.json()
+            assistant_id = assistant_data.get("id", "")
+            print(f"  Created Vapi assistant: {assistant_id}")
+
+        except Exception as e:
+            log_action(
+                agent_name="VoiceClient",
+                action="web_call_setup_failed",
+                inputs={},
+                outputs={},
+                success=False,
+                error_message=str(e),
+                decision_rationale="Failed to create Vapi assistant for web call",
+            )
+            return VoiceCallResult(call_id="", status="failed", transcript=str(e))
+
+        # Step 2: Generate and open the web call HTML page
+        public_key = settings.VAPI_PUBLIC_KEY
+        if not public_key:
+            print("  ERROR: VAPI_PUBLIC_KEY not set in .env")
+            print("  Get it from: https://dashboard.vapi.ai → Account → Public Key")
+            return VoiceCallResult(call_id="", status="failed",
+                                   transcript="VAPI_PUBLIC_KEY not configured")
+
+        html_path = self._generate_web_call_page(public_key, assistant_id, customer_name)
+        print(f"\n  ╔══════════════════════════════════════════════════════════╗")
+        print(f"  ║  ACTION REQUIRED: Web call page opened in browser!      ║")
+        print(f"  ║  Click 'Start Call' and allow microphone access.        ║")
+        print(f"  ║  Say 'Enterprise' or 'Growth' when asked.              ║")
+        print(f"  ║  Click 'End Call' when done.                            ║")
+        print(f"  ╚══════════════════════════════════════════════════════════╝\n")
+
+        webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
+
+        log_action(
+            agent_name="VoiceClient",
+            action="web_call_started",
+            inputs={"ae_name": ae_name, "customer_name": customer_name},
+            outputs={"assistant_id": assistant_id},
+            decision_rationale="Opened browser for web-based voice call",
+        )
+
+        # Step 3: Poll for the call result
+        return self._poll_vapi_web_call(assistant_id, customer_name)
+
+    def _generate_web_call_page(self, public_key: str, assistant_id: str, customer_name: str) -> str:
+        """Generate a local HTML page for Vapi web call."""
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NovaCRM Voice Call</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #0f172a; color: #e2e8f0; min-height: 100vh;
+         display: flex; align-items: center; justify-content: center; }}
+  .card {{ background: #1e293b; border-radius: 16px; padding: 40px;
+           max-width: 480px; width: 90%; text-align: center;
+           box-shadow: 0 20px 60px rgba(0,0,0,0.4); }}
+  h1 {{ font-size: 1.5rem; margin-bottom: 8px; color: #f8fafc; }}
+  .subtitle {{ color: #94a3b8; margin-bottom: 32px; }}
+  .customer {{ color: #38bdf8; font-weight: 600; }}
+  .status {{ padding: 12px 20px; border-radius: 8px; margin: 20px 0;
+             font-size: 0.95rem; background: #334155; }}
+  .status.active {{ background: #065f46; color: #6ee7b7; }}
+  .status.ended {{ background: #713f12; color: #fde68a; }}
+  #startBtn {{ background: #22c55e; color: white; border: none; padding: 16px 48px;
+               border-radius: 12px; font-size: 1.1rem; font-weight: 600;
+               cursor: pointer; transition: all 0.2s; }}
+  #startBtn:hover {{ background: #16a34a; transform: scale(1.02); }}
+  #startBtn:disabled {{ background: #475569; cursor: not-allowed; transform: none; }}
+  #endBtn {{ background: #ef4444; color: white; border: none; padding: 16px 48px;
+             border-radius: 12px; font-size: 1.1rem; font-weight: 600;
+             cursor: pointer; display: none; transition: all 0.2s; }}
+  #endBtn:hover {{ background: #dc2626; }}
+  .instructions {{ background: #334155; border-radius: 8px; padding: 16px;
+                   margin-top: 24px; text-align: left; font-size: 0.85rem;
+                   line-height: 1.6; color: #cbd5e1; }}
+  .instructions strong {{ color: #f8fafc; }}
+  .pulse {{ animation: pulse 2s ease-in-out infinite; }}
+  @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>NovaCRM Onboarding Assistant</h1>
+  <p class="subtitle">Voice call for <span class="customer">{customer_name}</span></p>
+
+  <div id="status" class="status">Ready — click Start Call to begin</div>
+
+  <div style="margin: 24px 0;">
+    <button id="startBtn" onclick="startCall()">Start Call</button>
+    <button id="endBtn" onclick="endCall()">End Call</button>
+  </div>
+
+  <div class="instructions">
+    <strong>Instructions:</strong><br>
+    1. Click "Start Call" and allow microphone access<br>
+    2. The AI will ask about the plan tier for {customer_name}<br>
+    3. Say <strong>"Enterprise"</strong> or <strong>"Growth"</strong><br>
+    4. Confirm when the AI repeats your choice<br>
+    5. Click "End Call" when finished
+  </div>
+</div>
+
+<script>
+  let vapi = null;
+
+  async function loadVapiSDK() {{
+    return new Promise((resolve, reject) => {{
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.3.1/dist/vapi.min.js';
+      script.onload = resolve;
+      script.onerror = () => {{
+        const fallback = document.createElement('script');
+        fallback.src = 'https://unpkg.com/@vapi-ai/web@2.3.1/dist/vapi.min.js';
+        fallback.onload = resolve;
+        fallback.onerror = reject;
+        document.head.appendChild(fallback);
+      }};
+      document.head.appendChild(script);
+    }});
+  }}
+
+  async function startCall() {{
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    const endBtn = document.getElementById('endBtn');
+
+    statusEl.textContent = 'Loading Vapi SDK...';
+    startBtn.disabled = true;
+
+    try {{
+      await loadVapiSDK();
+
+      const VapiClass = window.Vapi || (window.vapiSDK && window.vapiSDK.default);
+      if (!VapiClass) {{
+        statusEl.textContent = 'Error: Vapi SDK not loaded. Check console.';
+        startBtn.disabled = false;
+        return;
+      }}
+
+      vapi = new VapiClass('{public_key}');
+
+      vapi.on('call-start', () => {{
+        statusEl.textContent = 'Connected! Speak now...';
+        statusEl.className = 'status active pulse';
+        endBtn.style.display = 'inline-block';
+      }});
+
+      vapi.on('call-end', () => {{
+        statusEl.textContent = 'Call ended. You can close this tab.';
+        statusEl.className = 'status ended';
+        endBtn.style.display = 'none';
+        startBtn.style.display = 'none';
+      }});
+
+      vapi.on('speech-start', () => {{
+        statusEl.textContent = 'AI is speaking...';
+      }});
+
+      vapi.on('speech-end', () => {{
+        statusEl.textContent = 'Your turn — speak now...';
+      }});
+
+      vapi.on('error', (e) => {{
+        statusEl.textContent = 'Error: ' + (e.message || JSON.stringify(e));
+        statusEl.className = 'status';
+        startBtn.disabled = false;
+        endBtn.style.display = 'none';
+      }});
+
+      statusEl.textContent = 'Connecting...';
+      await vapi.start('{assistant_id}');
+
+    }} catch (err) {{
+      statusEl.textContent = 'Failed to start: ' + err.message;
+      startBtn.disabled = false;
+    }}
+  }}
+
+  function endCall() {{
+    if (vapi) {{
+      vapi.stop();
+    }}
+  }}
+</script>
+</body>
+</html>"""
+
+        page_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "web")
+        os.makedirs(page_dir, exist_ok=True)
+        page_path = os.path.join(page_dir, "vapi_call.html")
+        with open(page_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        return os.path.abspath(page_path)
+
+    def _poll_vapi_web_call(self, assistant_id: str, customer_name: str,
+                            max_wait: int = 180, interval: int = 5) -> VoiceCallResult:
+        """Poll Vapi for a completed web call made to our assistant."""
+        seen_calls: set[str] = set()
+
+        # Snapshot existing calls
+        try:
+            resp = requests.get(
+                f"{self.base_url}/call",
+                headers=self.headers,
+                params={"limit": 10, "assistantId": assistant_id},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                for c in resp.json():
+                    seen_calls.add(c.get("id", ""))
+        except Exception:
+            pass
+
+        print(f"  Waiting for your web call (timeout: {max_wait}s)...")
+        elapsed = 0
+
+        while elapsed < max_wait:
+            time.sleep(interval)
+            elapsed += interval
+
+            try:
+                resp = requests.get(
+                    f"{self.base_url}/call",
+                    headers=self.headers,
+                    params={"limit": 10, "assistantId": assistant_id},
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    continue
+
+                for call in resp.json():
+                    call_id = call.get("id", "")
+                    if call_id in seen_calls:
+                        continue
+
+                    status = call.get("status", "")
+                    if status == "ended":
+                        print(f"  Web call completed! Processing transcript...")
+                        return self._parse_call_result(call_id, call)
+                    elif status in ("ringing", "in-progress", "queued"):
+                        print(f"  Call in progress... waiting for it to finish.")
+            except Exception:
+                pass
+
+            remaining = max_wait - elapsed
+            if remaining > 0 and elapsed % 15 == 0:
+                print(f"  Still waiting... ({remaining}s remaining)")
+
+        return VoiceCallResult(call_id="", status="timeout",
+                               transcript="No web call completed within timeout period")
+
     # ── Vapi Inbound (AE calls our number) ─────────────────────────────
 
     def _vapi_inbound(self, ae_phone: str, ae_name: str, customer_name: str) -> VoiceCallResult:
@@ -72,9 +369,11 @@ class BlandVoiceClient:
         prompt = self._build_system_prompt(ae_name, customer_name)
         vapi_number = settings.VAPI_PHONE_NUMBER
 
-        # Update the phone number's assistant configuration
+        # Step 1: Create a dedicated assistant via POST /assistant
+        # Step 2: Assign it to the phone number via PATCH /phone-number/{id}
         try:
-            assistant_config = {
+            assistant_payload = {
+                "name": f"NovaCRM Onboarding - {customer_name}",
                 "firstMessage": (
                     f"Hi! This is NovaCRM's onboarding assistant. "
                     f"I understand you're calling about the new deal for {customer_name}. "
@@ -91,22 +390,36 @@ class BlandVoiceClient:
                 },
             }
 
+            create_resp = requests.post(
+                f"{self.base_url}/assistant",
+                json=assistant_payload,
+                headers=self.headers,
+                timeout=15,
+            )
+
+            if create_resp.status_code not in (200, 201):
+                print(f"  Vapi assistant creation error: {create_resp.text[:300]}")
+                create_resp.raise_for_status()
+
+            assistant_id = create_resp.json().get("id", "")
+            print(f"  Created Vapi assistant: {assistant_id}")
+
             resp = requests.patch(
                 f"{self.base_url}/phone-number/{settings.VAPI_PHONE_ID}",
-                json={"assistantId": None, "assistant": assistant_config},
+                json={"assistantId": assistant_id},
                 headers=self.headers,
                 timeout=15,
             )
 
             if resp.status_code not in (200, 201):
-                print(f"  Vapi setup error: {resp.text[:300]}")
+                print(f"  Vapi phone assignment error: {resp.text[:300]}")
 
             log_action(
                 agent_name="VoiceClient",
                 action="inbound_setup",
                 inputs={"ae_name": ae_name, "customer_name": customer_name, "vapi_number": vapi_number},
-                outputs={"status": resp.status_code, "response": resp.text[:200]},
-                decision_rationale=f"Configured Vapi number for inbound call from AE",
+                outputs={"assistant_id": assistant_id, "status": resp.status_code},
+                decision_rationale=f"Created assistant {assistant_id} and assigned to phone number",
             )
 
         except Exception as e:
