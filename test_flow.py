@@ -473,13 +473,62 @@ def step6_full_flow():
 
 # ── Main ────────────────────────────────────────────────────────────
 
+def step7_gmail():
+    header(7, "Gmail IMAP Connection")
+
+    address = os.getenv("GMAIL_ADDRESS", "")
+    password = os.getenv("GMAIL_APP_PASSWORD", "")
+
+    if not address or not password:
+        fail("GMAIL_ADDRESS and GMAIL_APP_PASSWORD not set in .env")
+        print(f"\n  Setup:")
+        print(f"  1. Enable 2-Step Verification: https://myaccount.google.com/security")
+        print(f"  2. Generate App Password: https://myaccount.google.com/apppasswords")
+        print(f"  3. Add to .env:")
+        print(f"     GMAIL_ADDRESS=your_email@gmail.com")
+        print(f"     GMAIL_APP_PASSWORD=your_16_char_app_password\n")
+        return False
+
+    info(f"Gmail address: {address}")
+    info("Connecting via IMAP...")
+
+    from onboarding_agent.integrations.gmail_client import GmailClient
+
+    try:
+        client = GmailClient()
+        emails = client.fetch_unread_deal_emails()
+
+        if emails:
+            success(f"Found {len(emails)} unread deal email(s)!")
+            for e in emails:
+                info(f"  Subject: {e.get('subject', 'N/A')}")
+                info(f"  From: {e.get('from', 'N/A')}")
+                body_preview = e.get('body', '')[:150].replace('\n', ' ')
+                info(f"  Body: {body_preview}...")
+                print()
+        else:
+            warn("No unread deal emails found.")
+            info("Send yourself an email with subject containing 'new deal', 'closed won', or 'new customer'")
+            info("Then run this step again.")
+
+        client.disconnect()
+        success("Gmail IMAP connection works!")
+        return True
+
+    except Exception as e:
+        fail(f"Gmail connection failed: {e}")
+        info("Check your GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env")
+        return False
+
+
 STEPS = {
     "1": ("Rocketlane API Connection", step1_rocketlane_connection),
     "2": ("Rocketlane Project Creation", step2_rocketlane_create_project),
-    "3": ("Bland.ai Voice Call", step3_voice_call),
+    "3": ("Voice AI Call", step3_voice_call),
     "4": ("Email Parsing (LLM)", step4_email_parsing),
     "5": ("Slack Channel", step5_slack),
     "6": ("Full Happy Path", step6_full_flow),
+    "7": ("Gmail IMAP Connection", step7_gmail),
 }
 
 def main():
