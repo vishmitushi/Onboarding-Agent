@@ -440,8 +440,21 @@ class BlandVoiceClient:
 
                     status = call.get("status", "")
                     if status == "ended":
-                        print(f"  Web call completed! Processing transcript...")
-                        return self._parse_call_result(call_id, call)
+                        print(f"  Web call completed! Fetching full transcript...")
+                        # Fetch full call details (list endpoint may omit transcript)
+                        time.sleep(3)
+                        full_data = call
+                        try:
+                            detail_resp = requests.get(
+                                f"{self.base_url}/call/{call_id}",
+                                headers=self.headers,
+                                timeout=15,
+                            )
+                            if detail_resp.status_code == 200:
+                                full_data = detail_resp.json()
+                        except Exception:
+                            pass
+                        return self._parse_call_result(call_id, full_data)
                     elif status in ("ringing", "in-progress", "queued"):
                         print(f"  Call in progress... waiting for it to finish.")
             except Exception:
@@ -786,6 +799,21 @@ class BlandVoiceClient:
             or data.get("artifact", {}).get("transcript", "")
             or ""
         )
+
+        # Vapi web calls store conversation in 'messages' array
+        if not transcript:
+            messages = data.get("messages", []) or data.get("artifact", {}).get("messages", [])
+            parts = []
+            for msg in messages:
+                role = msg.get("role", "")
+                content = msg.get("message", "") or msg.get("content", "")
+                if content and role in ("assistant", "user", "bot"):
+                    parts.append(f"{role}: {content}")
+            if parts:
+                transcript = "\n".join(parts)
+
+        print(f"  [DEBUG] Transcript ({len(transcript)} chars): {transcript[:300]}")
+        print(f"  [DEBUG] Data keys: {list(data.keys())}")
         transcript_lower = transcript.lower()
 
         plan_tier = None
