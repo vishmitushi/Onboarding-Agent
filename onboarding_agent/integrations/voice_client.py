@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import http.server
 import os
+import threading
 import time
 import webbrowser
 
@@ -131,14 +133,20 @@ class BlandVoiceClient:
                                    transcript="VAPI_PUBLIC_KEY not configured")
 
         html_path = self._generate_web_call_page(public_key, assistant_id, customer_name)
+
+        # Serve via localhost (browsers block microphone on file:// URLs)
+        web_dir = os.path.dirname(html_path)
+        port = self._start_local_server(web_dir)
+
         print(f"\n  ╔══════════════════════════════════════════════════════════╗")
         print(f"  ║  ACTION REQUIRED: Web call page opened in browser!      ║")
-        print(f"  ║  Click 'Start Call' and allow microphone access.        ║")
+        print(f"  ║  Click the GREEN phone button (bottom-right corner).    ║")
+        print(f"  ║  Allow microphone access when prompted.                 ║")
         print(f"  ║  Say 'Enterprise' or 'Growth' when asked.              ║")
-        print(f"  ║  Click 'End Call' when done.                            ║")
+        print(f"  ║  Click the RED button to end the call.                  ║")
         print(f"  ╚══════════════════════════════════════════════════════════╝\n")
 
-        webbrowser.open(f"file:///{html_path.replace(os.sep, '/')}")
+        webbrowser.open(f"http://localhost:{port}/vapi_call.html")
 
         log_action(
             agent_name="VoiceClient",
@@ -152,71 +160,123 @@ class BlandVoiceClient:
         return self._poll_vapi_web_call(assistant_id, customer_name)
 
     def _generate_web_call_page(self, public_key: str, assistant_id: str, customer_name: str) -> str:
-        """Generate a local HTML page for Vapi web call."""
+        """Generate a local HTML page styled like a phone dialing screen."""
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NovaCRM Voice Call</title>
+<title>NovaCRM — Calling AE</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #0f172a; color: #e2e8f0; min-height: 100vh;
+         background: linear-gradient(135deg, #0c0c1d 0%, #1a1a3e 50%, #0c0c1d 100%);
+         color: #fff; min-height: 100vh;
          display: flex; align-items: center; justify-content: center; }}
-  .card {{ background: #1e293b; border-radius: 16px; padding: 40px;
-           max-width: 480px; width: 90%; text-align: center;
-           box-shadow: 0 20px 60px rgba(0,0,0,0.4); }}
-  h1 {{ font-size: 1.5rem; margin-bottom: 8px; color: #f8fafc; }}
-  .subtitle {{ color: #94a3b8; margin-bottom: 32px; }}
-  .customer {{ color: #38bdf8; font-weight: 600; }}
-  .status {{ padding: 12px 20px; border-radius: 8px; margin: 20px 0;
-             font-size: 0.95rem; background: #334155; }}
-  .status.active {{ background: #065f46; color: #6ee7b7; }}
-  .status.ended {{ background: #713f12; color: #fde68a; }}
-  #startBtn {{ background: #22c55e; color: white; border: none; padding: 16px 48px;
-               border-radius: 12px; font-size: 1.1rem; font-weight: 600;
-               cursor: pointer; transition: all 0.2s; }}
-  #startBtn:hover {{ background: #16a34a; transform: scale(1.02); }}
-  #startBtn:disabled {{ background: #475569; cursor: not-allowed; transform: none; }}
-  #endBtn {{ background: #ef4444; color: white; border: none; padding: 16px 48px;
-             border-radius: 12px; font-size: 1.1rem; font-weight: 600;
-             cursor: pointer; display: none; transition: all 0.2s; }}
-  #endBtn:hover {{ background: #dc2626; }}
-  .instructions {{ background: #334155; border-radius: 8px; padding: 16px;
-                   margin-top: 24px; text-align: left; font-size: 0.85rem;
-                   line-height: 1.6; color: #cbd5e1; }}
-  .instructions strong {{ color: #f8fafc; }}
-  .pulse {{ animation: pulse 2s ease-in-out infinite; }}
-  @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}
+
+  .phone-screen {{ width: 380px; text-align: center; padding: 40px 20px; }}
+
+  /* Avatar ring */
+  .avatar-ring {{ width: 120px; height: 120px; border-radius: 50%;
+                  margin: 0 auto 24px; position: relative; }}
+  .avatar-ring::before {{ content: ''; position: absolute; inset: -4px;
+                          border-radius: 50%; border: 3px solid rgba(34,197,94,0.4);
+                          animation: ring-pulse 2s ease-out infinite; }}
+  .avatar {{ width: 120px; height: 120px; border-radius: 50%;
+             background: linear-gradient(135deg, #22c55e, #16a34a);
+             display: flex; align-items: center; justify-content: center;
+             font-size: 3rem; color: white; }}
+  .ringing .avatar-ring::before {{ border-color: rgba(34,197,94,0.6); }}
+  .connected .avatar {{ background: linear-gradient(135deg, #3b82f6, #1d4ed8); }}
+  .connected .avatar-ring::before {{ border-color: rgba(59,130,246,0.4); }}
+  .ended .avatar {{ background: linear-gradient(135deg, #6b7280, #374151); }}
+  .ended .avatar-ring::before {{ animation: none; border-color: transparent; }}
+
+  @keyframes ring-pulse {{
+    0% {{ transform: scale(1); opacity: 1; }}
+    100% {{ transform: scale(1.3); opacity: 0; }}
+  }}
+
+  .caller-name {{ font-size: 1.6rem; font-weight: 600; margin-bottom: 4px; }}
+  .caller-label {{ font-size: 0.9rem; color: rgba(255,255,255,0.5); margin-bottom: 8px; }}
+
+  #callStatus {{ font-size: 1rem; color: rgba(255,255,255,0.7); margin-bottom: 32px;
+                 min-height: 24px; }}
+  #callStatus.active {{ color: #4ade80; }}
+
+  #timer {{ font-size: 2.2rem; font-weight: 300; font-variant-numeric: tabular-nums;
+            letter-spacing: 2px; margin-bottom: 40px; min-height: 40px;
+            color: rgba(255,255,255,0.9); }}
+
+  .btn-row {{ display: flex; justify-content: center; gap: 32px; margin-bottom: 24px; }}
+
+  .call-btn {{ width: 72px; height: 72px; border-radius: 50%; border: none;
+               cursor: pointer; display: flex; align-items: center; justify-content: center;
+               transition: transform 0.15s, box-shadow 0.15s; }}
+  .call-btn:hover {{ transform: scale(1.08); }}
+  .call-btn:active {{ transform: scale(0.95); }}
+  .call-btn svg {{ width: 32px; height: 32px; fill: white; }}
+
+  #answerBtn {{ background: linear-gradient(135deg, #22c55e, #16a34a);
+                box-shadow: 0 0 30px rgba(34,197,94,0.4); }}
+  #hangupBtn {{ background: linear-gradient(135deg, #ef4444, #dc2626);
+                box-shadow: 0 0 30px rgba(239,68,68,0.3); display: none; }}
+
+  .hint {{ font-size: 0.8rem; color: rgba(255,255,255,0.35); margin-top: 16px; }}
+  .hint strong {{ color: rgba(255,255,255,0.55); }}
+
+  /* Dots animation for "Dialing..." */
+  .dots::after {{ content: ''; animation: dots 1.5s steps(4, end) infinite; }}
+  @keyframes dots {{
+    0% {{ content: ''; }} 25% {{ content: '.'; }} 50% {{ content: '..'; }} 75% {{ content: '...'; }}
+  }}
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>NovaCRM Onboarding Assistant</h1>
-  <p class="subtitle">Voice call for <span class="customer">{customer_name}</span></p>
-
-  <div id="status" class="status">Ready — click Start Call to begin</div>
-
-  <div style="margin: 24px 0;">
-    <button id="startBtn" disabled>Loading SDK...</button>
+<div class="phone-screen" id="phoneScreen">
+  <div class="avatar-ring">
+    <div class="avatar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" width="56" height="56">
+        <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75a17.933 17.933 0 01-7.5-1.632z"/>
+      </svg>
+    </div>
   </div>
 
-  <div class="instructions">
-    <strong>Instructions:</strong><br>
-    1. Click the green <strong>phone button</strong> (bottom-right corner)<br>
-    2. Allow microphone access when prompted<br>
-    3. The AI will ask about the plan tier for {customer_name}<br>
-    4. Say <strong>"Enterprise"</strong> or <strong>"Growth"</strong><br>
-    5. Confirm when the AI repeats your choice<br>
-    6. Click the red button to end the call
+  <div class="caller-name">{customer_name}</div>
+  <div class="caller-label">NovaCRM Onboarding · Plan Confirmation</div>
+
+  <div id="callStatus" class="dots">Initializing</div>
+  <div id="timer"></div>
+
+  <div class="btn-row">
+    <button class="call-btn" id="answerBtn" onclick="answerCall()" title="Answer">
+      <svg viewBox="0 0 24 24"><path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 01 1.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1.02l-2.2 2.2z"/></svg>
+    </button>
+    <button class="call-btn" id="hangupBtn" onclick="hangupCall()" title="Hang up">
+      <svg viewBox="0 0 24 24"><path d="M3.68 16.07l3.92-3.11V9.59c2.87-1.04 5.97-1.04 8.84 0v3.37l3.91 3.11c.56.45.19 1.38-.53 1.38H4.21c-.72 0-1.09-.93-.53-1.38z"/></svg>
+    </button>
+  </div>
+
+  <div class="hint">
+    Say <strong>"Enterprise"</strong> or <strong>"Growth"</strong> when asked about the plan tier
   </div>
 </div>
 
 <script>
-  var assistant = '{assistant_id}';
-  var apiKey = '{public_key}';
+  const ASSISTANT_ID = '{assistant_id}';
+  const PUBLIC_KEY = '{public_key}';
 
+  let vapiInstance = null;
+  let timerInterval = null;
+  let callSeconds = 0;
+
+  const phoneScreen = document.getElementById('phoneScreen');
+  const statusEl = document.getElementById('callStatus');
+  const timerEl = document.getElementById('timer');
+  const answerBtn = document.getElementById('answerBtn');
+  const hangupBtn = document.getElementById('hangupBtn');
+
+  // Load SDK on page load
   (function (d, t) {{
     var g = d.createElement(t), s = d.getElementsByTagName(t)[0];
     g.src = 'https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js';
@@ -224,23 +284,108 @@ class BlandVoiceClient:
     g.async = true;
     s.parentNode.insertBefore(g, s);
     g.onload = function () {{
-      document.getElementById('status').textContent = 'SDK loaded — click the phone button (bottom-right) to start!';
-      document.getElementById('startBtn').style.display = 'none';
-      window.vapiSDK.run({{
-        apiKey: apiKey,
-        assistant: assistant,
-        config: {{
-          position: 'bottom-right',
-          offset: '40px',
-          width: '50px',
-          height: '50px',
-          idle: {{ color: 'rgb(34, 197, 94)', type: 'pill', title: 'Start Call', subtitle: 'Talk to AI', icon: 'https://unpkg.com/lucide-static@0.321.0/icons/phone.svg' }},
-          loading: {{ color: 'rgb(234, 179, 8)', type: 'pill', title: 'Connecting...', subtitle: 'Please wait', icon: 'https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg' }},
-          active: {{ color: 'rgb(239, 68, 68)', type: 'pill', title: 'End Call', subtitle: 'Click to stop', icon: 'https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg' }},
-        }}
-      }});
+      // Hide the default Vapi widget button
+      var style = d.createElement('style');
+      style.textContent = '#vapi-support-btn, [id^="vapi"] {{ display:none!important; }}';
+      d.head.appendChild(style);
+
+      statusEl.textContent = 'Dialing';
+      statusEl.className = 'dots';
+      phoneScreen.className = 'phone-screen ringing';
+
+      // SDK is ready — show ringing state, user clicks Answer
+      setTimeout(function() {{
+        statusEl.textContent = 'Incoming call — tap Answer';
+        statusEl.className = '';
+      }}, 2000);
+    }};
+    g.onerror = function() {{
+      statusEl.textContent = 'Failed to load voice SDK';
+      statusEl.className = '';
     }};
   }})(document, 'script');
+
+  function formatTime(sec) {{
+    var m = Math.floor(sec / 60).toString().padStart(2, '0');
+    var s = (sec % 60).toString().padStart(2, '0');
+    return m + ':' + s;
+  }}
+
+  function startTimer() {{
+    callSeconds = 0;
+    timerEl.textContent = '00:00';
+    timerInterval = setInterval(function() {{
+      callSeconds++;
+      timerEl.textContent = formatTime(callSeconds);
+    }}, 1000);
+  }}
+
+  function stopTimer() {{
+    if (timerInterval) clearInterval(timerInterval);
+  }}
+
+  function answerCall() {{
+    statusEl.textContent = 'Connecting';
+    statusEl.className = 'dots';
+    answerBtn.style.display = 'none';
+
+    // Use vapiSDK internal to start call
+    try {{
+      window.vapiSDK.run({{
+        apiKey: PUBLIC_KEY,
+        assistant: ASSISTANT_ID,
+        config: {{ position: 'bottom-right', offset: '-9999px', width: '1px', height: '1px' }}
+      }});
+
+      // Click the hidden Vapi button to start the call
+      setTimeout(function() {{
+        var vapiBtn = document.querySelector('#vapi-support-btn, [id^="vapi"] button, [class*="vapi"] button');
+        if (vapiBtn) {{
+          vapiBtn.click();
+        }} else {{
+          // Fallback: look harder
+          var allBtns = document.querySelectorAll('button');
+          for (var i = allBtns.length - 1; i >= 0; i--) {{
+            if (allBtns[i] !== answerBtn && allBtns[i] !== hangupBtn) {{
+              allBtns[i].click();
+              break;
+            }}
+          }}
+        }}
+        phoneScreen.className = 'phone-screen connected';
+        statusEl.textContent = 'Connected';
+        statusEl.className = 'active';
+        hangupBtn.style.display = 'flex';
+        startTimer();
+      }}, 1500);
+
+    }} catch (err) {{
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.className = '';
+      answerBtn.style.display = 'flex';
+    }}
+  }}
+
+  function hangupCall() {{
+    // Click the Vapi button again to end
+    var vapiBtn = document.querySelector('#vapi-support-btn, [id^="vapi"] button, [class*="vapi"] button');
+    if (vapiBtn) vapiBtn.click();
+    else {{
+      var allBtns = document.querySelectorAll('button');
+      for (var i = allBtns.length - 1; i >= 0; i--) {{
+        if (allBtns[i] !== answerBtn && allBtns[i] !== hangupBtn) {{
+          allBtns[i].click();
+          break;
+        }}
+      }}
+    }}
+
+    stopTimer();
+    phoneScreen.className = 'phone-screen ended';
+    statusEl.textContent = 'Call Ended · ' + formatTime(callSeconds);
+    statusEl.className = '';
+    hangupBtn.style.display = 'none';
+  }}
 </script>
 </body>
 </html>"""
@@ -308,6 +453,21 @@ class BlandVoiceClient:
 
         return VoiceCallResult(call_id="", status="timeout",
                                transcript="No web call completed within timeout period")
+
+    def _start_local_server(self, directory: str) -> int:
+        """Start a background HTTP server on localhost to serve the web call page."""
+        handler = lambda *args, **kwargs: http.server.SimpleHTTPRequestHandler(
+            *args, directory=directory, **kwargs
+        )
+        for port in range(8765, 8780):
+            try:
+                server = http.server.HTTPServer(("127.0.0.1", port), handler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                return port
+            except OSError:
+                continue
+        raise RuntimeError("Could not find an open port for local server")
 
     # ── Vapi Inbound (AE calls our number) ─────────────────────────────
 
