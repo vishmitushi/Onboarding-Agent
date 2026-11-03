@@ -144,21 +144,38 @@ def step2_rocketlane_create_project():
 # ── Step 3: Test Bland.ai Voice Call ────────────────────────────────
 
 def step3_voice_call():
-    header(3, "Bland.ai Voice Call")
+    header(3, "Voice AI Call")
 
-    api_key = os.getenv("BLAND_API_KEY", "")
-    if not api_key:
-        fail("BLAND_API_KEY not set in .env")
-        print(f"\n  How to get your Bland.ai API key:")
-        print(f"  1. Sign up at {cyan('https://app.bland.ai')}")
-        print(f"  2. Go to {bold('Dashboard')} → copy your API key")
-        print(f"  3. Add to your .env file:")
-        print(f"     BLAND_API_KEY=your_key_here\n")
-        return False
+    provider = os.getenv("VOICE_PROVIDER", "vapi")
 
-    info(f"API Key found: {api_key[:8]}...")
+    if provider == "vapi":
+        api_key = os.getenv("VAPI_API_KEY", "")
+        phone_id = os.getenv("VAPI_PHONE_ID", "")
+        if not api_key:
+            fail("VAPI_API_KEY not set in .env")
+            print(f"\n  How to set up Vapi.ai:")
+            print(f"  1. Sign up at {cyan('https://vapi.ai')} (free credits included)")
+            print(f"  2. Go to {bold('Phone Numbers')} → buy a number")
+            print(f"  3. Copy the Phone Number ID")
+            print(f"  4. Go to {bold('Dashboard')} → copy your API key")
+            print(f"  5. Add to .env:")
+            print(f"     VOICE_PROVIDER=vapi")
+            print(f"     VAPI_API_KEY=your_key")
+            print(f"     VAPI_PHONE_ID=your_phone_id\n")
+            return False
+        if not phone_id:
+            fail("VAPI_PHONE_ID not set in .env (buy a number in Vapi dashboard)")
+            return False
+        info(f"Vapi.ai API key found: {api_key[:8]}...")
+        info(f"Phone Number ID: {phone_id[:8]}...")
+    else:
+        api_key = os.getenv("BLAND_API_KEY", "")
+        if not api_key:
+            fail("BLAND_API_KEY not set in .env")
+            return False
+        info(f"Bland.ai API key found: {api_key[:8]}...")
 
-    phone = input(f"  Enter a phone number to test call (e.g. +15551234567): ").strip()
+    phone = input(f"  Enter your phone number to receive the test call (e.g. +919876543210): ").strip()
     if not phone:
         warn("No phone number provided, skipping live call test")
         return True
@@ -166,11 +183,14 @@ def step3_voice_call():
     from onboarding_agent.integrations.voice_client import BlandVoiceClient
     client = BlandVoiceClient()
 
-    info(f"Placing test call to {phone}...")
+    info(f"Placing real AI voice call to {phone} via {provider}...")
+    info("Answer your phone — the AI will ask you to confirm the plan tier.")
+    info("Say 'Enterprise' or 'Growth' when asked.\n")
+
     result = client.call_ae_for_plan_confirmation(
         ae_phone=phone,
         ae_name="Test AE",
-        customer_name="Test Corp",
+        customer_name="Acme Corp",
     )
 
     info(f"Call ID: {result.call_id}")
@@ -180,13 +200,19 @@ def step3_voice_call():
     info(f"Duration: {result.duration_seconds}s")
 
     if result.transcript:
-        info(f"Transcript: {result.transcript[:200]}")
+        info(f"Transcript: {result.transcript[:300]}")
 
     if result.status == "completed" and result.plan_tier:
-        success(f"Voice call confirmed: {result.plan_tier.value}")
+        if result.confidence >= 0.8:
+            success(f"Voice call confirmed: {result.plan_tier.value} ({result.confidence:.0%} ≥ 80% gate)")
+        else:
+            warn(f"Plan tier detected but confidence too low ({result.confidence:.0%} < 80%) — would trigger retry")
         return True
+    elif result.status == "failed":
+        fail(f"Call failed: {result.transcript[:200] if result.transcript else 'No details'}")
+        return False
     else:
-        warn(f"Call status: {result.status} — check the Bland.ai dashboard for details")
+        warn(f"Call status: {result.status}")
         return True
 
 

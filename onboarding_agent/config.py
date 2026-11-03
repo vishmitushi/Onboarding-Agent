@@ -13,9 +13,18 @@ class Settings:
     GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "")
     GMAIL_POLL_INTERVAL_SECONDS: int = int(os.getenv("GMAIL_POLL_INTERVAL_SECONDS", "30"))
 
-    # Voice AI (Bland.ai)
+    # Voice AI — "vapi" (international, recommended) or "bland" (US/Canada only)
+    VOICE_PROVIDER: str = os.getenv("VOICE_PROVIDER", "vapi")
+
+    # Vapi.ai (free credits, voice AI)
+    VAPI_API_KEY: str = os.getenv("VAPI_API_KEY", "")
+    VAPI_PHONE_ID: str = os.getenv("VAPI_PHONE_ID", "")
+    VAPI_PHONE_NUMBER: str = os.getenv("VAPI_PHONE_NUMBER", "")
+
+    # Bland.ai (fallback — US/Canada only on free tier)
     BLAND_API_KEY: str = os.getenv("BLAND_API_KEY", "")
     BLAND_API_URL: str = "https://api.bland.ai/v1"
+
     VOICE_CALL_MAX_RETRIES: int = int(os.getenv("VOICE_CALL_MAX_RETRIES", "2"))
     VOICE_CALL_TIMEOUT_SECONDS: int = int(os.getenv("VOICE_CALL_TIMEOUT_SECONDS", "120"))
 
@@ -34,7 +43,7 @@ class Settings:
 
     # Groq (free tier — uses Llama 3.3 70B)
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
 
     # Anthropic (Claude) — alternative
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
