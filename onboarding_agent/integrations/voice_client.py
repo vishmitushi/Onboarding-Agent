@@ -8,9 +8,32 @@ import webbrowser
 
 import requests
 
+import json
+
 from onboarding_agent.config import settings
 from onboarding_agent.guardrails import log_action
 from onboarding_agent.models import PlanTier, VoiceCallResult
+
+TRANSCRIPT_ANALYSIS_PROMPT = """\
+You are analyzing a voice call transcript between an AI onboarding assistant and \
+an Account Executive (AE). The assistant asked the AE to confirm the customer's plan tier.
+
+There are only two options:
+- "enterprise" — 30-day onboarding, dedicated CSM
+- "growth" — 14-day onboarding, pooled CSM
+
+Based on the AE's responses (not the assistant's questions), determine:
+1. Which plan tier the AE confirmed
+2. How confident you are in this determination (0.0 to 1.0)
+
+Return ONLY a JSON object:
+{{"plan_tier": "enterprise" or "growth" or null, "confidence": 0.0 to 1.0}}
+
+If the AE never clearly stated a plan tier, return {{"plan_tier": null, "confidence": 0.0}}
+
+Transcript:
+{transcript}
+"""
 
 
 class BlandVoiceClient:
@@ -801,42 +824,33 @@ class BlandVoiceClient:
         )
 
         # Vapi web calls store conversation in 'messages' array
-        if not transcript:
-            messages = data.get("messages", []) or data.get("artifact", {}).get("messages", [])
-            parts = []
-            for msg in messages:
-                role = msg.get("role", "")
-                content = msg.get("message", "") or msg.get("content", "")
-                if content and role in ("assistant", "user", "bot"):
-                    parts.append(f"{role}: {content}")
-            if parts:
-                transcript = "\n".join(parts)
+        messages = data.get("messages", []) or data.get("artifact", {}).get("messages", [])
+        user_text_parts = []
+        all_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("message", "") or msg.get("content", "")
+            if content and role in ("assistant", "user", "bot"):
+                all_parts.append(f"{role}: {content}")
+                if role == "user":
+                    user_text_parts.append(content)
+
+        if not transcript and all_parts:
+            transcript = "\n".join(all_parts)
+
+        # Score plan tier from USER's words only (AI mentions both plans in its question)
+        user_text = " ".join(user_text_parts).lower() if user_text_parts else ""
+        score_text = user_text if user_text else transcript.lower()
 
         print(f"  [DEBUG] Transcript ({len(transcript)} chars): {transcript[:300]}")
-        print(f"  [DEBUG] Data keys: {list(data.keys())}")
-        transcript_lower = transcript.lower()
+        print(f"  [DEBUG] User said: {user_text[:200]}")
 
-        plan_tier = None
-        confidence = 0.0
+        # Use LLM to analyze transcript (much more accurate than keyword matching)
+        plan_tier, confidence = self._llm_analyze_transcript(transcript)
 
-        enterprise_signals = ["enterprise", "30-day", "30 day", "dedicated csm"]
-        growth_signals = ["growth", "14-day", "14 day", "pooled csm"]
-
-        enterprise_hits = sum(1 for s in enterprise_signals if s in transcript_lower)
-        growth_hits = sum(1 for s in growth_signals if s in transcript_lower)
-
-        if enterprise_hits > 0 and growth_hits == 0:
-            plan_tier = PlanTier.ENTERPRISE
-            confidence = min(0.5 + enterprise_hits * 0.2, 1.0)
-        elif growth_hits > 0 and enterprise_hits == 0:
-            plan_tier = PlanTier.GROWTH
-            confidence = min(0.5 + growth_hits * 0.2, 1.0)
-        elif enterprise_hits > 0 and growth_hits > 0:
-            confidence = 0.3
-
-        confirmed_phrases = ["yes", "correct", "that's right", "confirmed", "affirmative"]
-        if any(p in transcript_lower for p in confirmed_phrases):
-            confidence = min(confidence + 0.2, 1.0)
+        # Fallback to keyword matching if LLM fails
+        if plan_tier is None and confidence == 0.0:
+            plan_tier, confidence = self._keyword_analyze(score_text)
 
         duration = data.get("call_length", 0.0) or data.get("duration", 0.0) or 0.0
 
@@ -860,3 +874,78 @@ class BlandVoiceClient:
             transcript=transcript,
             duration_seconds=duration,
         )
+
+    def _llm_analyze_transcript(self, transcript: str) -> tuple:
+        """Use LLM to extract plan tier and confidence from transcript."""
+        if not transcript.strip():
+            return None, 0.0
+
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=settings.GROQ_API_KEY,
+                base_url="https://api.groq.com/openai/v1",
+            )
+
+            prompt = TRANSCRIPT_ANALYSIS_PROMPT.format(transcript=transcript)
+            response = client.chat.completions.create(
+                model=settings.GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
+                temperature=0,
+            )
+
+            raw = response.choices[0].message.content.strip()
+            # Strip markdown fences if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = raw.strip()
+
+            result = json.loads(raw)
+            tier_str = result.get("plan_tier")
+            conf = float(result.get("confidence", 0.0))
+
+            plan_tier = None
+            if tier_str == "enterprise":
+                plan_tier = PlanTier.ENTERPRISE
+            elif tier_str == "growth":
+                plan_tier = PlanTier.GROWTH
+
+            print(f"  [LLM] Plan: {plan_tier}, Confidence: {conf:.0%}")
+            return plan_tier, conf
+
+        except Exception as e:
+            print(f"  [LLM] Transcript analysis failed, using keyword fallback: {e}")
+            return None, 0.0
+
+    def _keyword_analyze(self, text: str) -> tuple:
+        """Fallback keyword-based plan tier detection."""
+        enterprise_signals = ["enterprise", "30-day", "30 day", "dedicated csm"]
+        growth_signals = ["growth", "14-day", "14 day", "pooled csm"]
+
+        enterprise_hits = sum(1 for s in enterprise_signals if s in text)
+        growth_hits = sum(1 for s in growth_signals if s in text)
+
+        plan_tier = None
+        confidence = 0.0
+
+        if enterprise_hits > 0 and growth_hits == 0:
+            plan_tier = PlanTier.ENTERPRISE
+            confidence = min(0.5 + enterprise_hits * 0.2, 1.0)
+        elif growth_hits > 0 and enterprise_hits == 0:
+            plan_tier = PlanTier.GROWTH
+            confidence = min(0.5 + growth_hits * 0.2, 1.0)
+        elif enterprise_hits > growth_hits:
+            plan_tier = PlanTier.ENTERPRISE
+            confidence = 0.5
+        elif growth_hits > enterprise_hits:
+            plan_tier = PlanTier.GROWTH
+            confidence = 0.5
+
+        confirmed = ["yes", "correct", "that's right", "confirmed", "yeah", "yep", "absolutely"]
+        if any(p in text for p in confirmed):
+            confidence = min(confidence + 0.2, 1.0)
+
+        return plan_tier, confidence
