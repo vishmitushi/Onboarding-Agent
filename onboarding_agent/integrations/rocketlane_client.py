@@ -44,28 +44,29 @@ class RocketlaneClient:
         return resp.json() if resp.content else {}
 
     def list_templates(self) -> list[dict[str, Any]]:
-        data = self._request("GET", "/projects/templates")
+        data = self._request("GET", "/templates")
         return data.get("data", data.get("templates", []))
 
-    def get_template_id(self, plan_tier: PlanTier) -> str | None:
+    def get_template_id(self, plan_tier: PlanTier) -> int | None:
         """Find the template matching the plan tier."""
         config = PLAN_TIER_CONFIG[plan_tier]
         template_name = config["template_name"]
         try:
             templates = self.list_templates()
-        except requests.RequestException:
+        except requests.RequestException as e:
             log_action(
                 agent_name="RocketlaneClient",
                 action="template_lookup_skipped",
                 inputs={"plan_tier": plan_tier.value},
-                outputs={},
+                outputs={"error": str(e)},
                 decision_rationale="Templates API unavailable; project will be created without a template source",
             )
             return None
 
         for tpl in templates:
             if template_name.lower() in tpl.get("name", "").lower():
-                return tpl.get("id", tpl.get("templateId"))
+                tid = tpl.get("templateId", tpl.get("id"))
+                return int(tid) if tid is not None else None
         return None
 
     def list_projects(self) -> list[dict[str, Any]]:
@@ -77,7 +78,7 @@ class RocketlaneClient:
         customer_name: str,
         plan_tier: PlanTier,
         customer_email: str,
-        template_id: str | None = None,
+        template_id: int | str | None = None,
     ) -> OnboardingProject:
         config = PLAN_TIER_CONFIG[plan_tier]
         start_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -88,14 +89,19 @@ class RocketlaneClient:
             "customer": {
                 "companyName": customer_name,
             },
-            "owner": {
-                "emailId": settings.ESCALATION_EMAIL,
-            },
-            "autoAssignOwner": True,
+            "autoCreateCompany": True,
         }
 
-        if template_id:
-            payload["sources"] = [{"id": template_id}]
+        owner_email = settings.ESCALATION_EMAIL
+        if owner_email and "@" in owner_email and "novacrm.com" not in owner_email:
+            payload["owner"] = {"emailId": owner_email}
+            payload["autoAssignOwner"] = True
+
+        if template_id is not None:
+            payload["sources"] = [{
+                "templateId": int(template_id),
+                "startDate": start_date,
+            }]
 
         log_action(
             agent_name="RocketlaneClient",
@@ -104,6 +110,7 @@ class RocketlaneClient:
                 "customer_name": customer_name,
                 "plan_tier": plan_tier.value,
                 "template_id": template_id,
+                "payload": payload,
             },
             outputs={},
             decision_rationale=(
@@ -146,6 +153,15 @@ class RocketlaneClient:
                 decision_rationale="Rocketlane API call failed",
             )
             raise
+
+    def import_template(self, project_id: str, template_id: int) -> dict[str, Any]:
+        """Import a template into an existing project."""
+        start_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        payload = {
+            "templateId": int(template_id),
+            "startDate": start_date,
+        }
+        return self._request("POST", f"/projects/{project_id}/import-template", payload)
 
     def check_existing_projects(self, customer_name: str) -> list[dict[str, Any]]:
         try:
