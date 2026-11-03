@@ -211,8 +211,8 @@ class RocketlaneClient:
         """Import a template into an existing project."""
         start_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         payload = {
-            "templateId": int(template_id),
             "startDate": start_date,
+            "templateId": int(template_id),
         }
         return self._request("POST", f"/projects/{project_id}/import-template", payload)
 
