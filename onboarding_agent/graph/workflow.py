@@ -4,32 +4,28 @@ Graph structure:
     START
       │
       ▼
-    parse_email
+    parse_email  (includes field validation)
       │
-      ├── deal_data exists ──► validate_email
-      │                            │
-      │                            ├── valid ──► call_ae
-      │                            │               │
-      │                            │               ▼
-      │                            │          validate_voice
-      │                            │               │
-      │                            │               ├── confirmed ──► check_duplicate
-      │                            │               │                      │
-      │                            │               │                      ├── no dup ──► create_project
-      │                            │               │                      │                   │
-      │                            │               │                      │                   ▼
-      │                            │               │                      │            create_slack_channel
-      │                            │               │                      │                   │
-      │                            │               │                      │                   ▼
-      │                            │               │                      │                  END
-      │                            │               │                      │
-      │                            │               │                      └── dup found ──► escalate ──► END
-      │                            │               │
-      │                            │               ├── retry ──► call_ae (loop)
-      │                            │               │
-      │                            │               └── max retries ──► escalate ──► END
-      │                            │
-      │                            └── invalid ──► escalate ──► END
+      ├── deal_data exists ──► call_ae
+      │                          │
+      │                          ▼
+      │                     validate_voice
+      │                          │
+      │                          ├── confirmed ──► check_duplicate
+      │                          │                      │
+      │                          │                      ├── no dup ──► create_project
+      │                          │                      │                   │
+      │                          │                      │                   ▼
+      │                          │                      │            create_slack_channel
+      │                          │                      │                   │
+      │                          │                      │                   ▼
+      │                          │                      │                  END
+      │                          │                      │
+      │                          │                      └── dup found ──► escalate ──► END
+      │                          │
+      │                          ├── retry ──► call_ae (loop)
+      │                          │
+      │                          └── max retries ──► escalate ──► END
       │
       └── parse failed ──► escalate ──► END
 """
@@ -48,7 +44,6 @@ def build_onboarding_graph() -> StateGraph:
 
     # ── Add nodes ──
     graph.add_node("parse_email", nodes.parse_email)
-    graph.add_node("validate_email", nodes.validate_email)
     graph.add_node("call_ae", nodes.call_ae)
     graph.add_node("validate_voice", nodes.validate_voice)
     graph.add_node("check_duplicate", nodes.check_duplicate)
@@ -63,12 +58,6 @@ def build_onboarding_graph() -> StateGraph:
     graph.add_conditional_edges(
         "parse_email",
         nodes.route_after_parse,
-        {"validate_email": "validate_email", "escalate": "escalate"},
-    )
-
-    graph.add_conditional_edges(
-        "validate_email",
-        nodes.route_after_validation,
         {"call_ae": "call_ae", "escalate": "escalate"},
     )
 

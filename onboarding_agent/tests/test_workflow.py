@@ -34,9 +34,11 @@ SAMPLE_EMAIL = {
 
 
 def _make_llm_response(parsed: dict) -> MagicMock:
-    mock = MagicMock()
-    mock.content = [MagicMock(text=json.dumps(parsed))]
-    return mock
+    mock_choice = MagicMock()
+    mock_choice.message.content = json.dumps(parsed)
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    return mock_resp
 
 
 def _parsed_fields() -> dict:
@@ -58,7 +60,7 @@ def _setup_agents(
 ):
     """Wire up mocked agents and inject them into the graph nodes."""
     llm_client = MagicMock()
-    llm_client.messages.create.return_value = _make_llm_response(
+    llm_client.chat.completions.create.return_value = _make_llm_response(
         llm_parsed or _parsed_fields()
     )
 
@@ -210,9 +212,11 @@ class TestWorkflowValidation:
 
     def test_llm_garbage_escalates(self):
         llm_client = MagicMock()
-        llm_client.messages.create.return_value = MagicMock(
-            content=[MagicMock(text="I cannot help with that.")]
-        )
+        mock_choice = MagicMock()
+        mock_choice.message.content = "I cannot help with that."
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        llm_client.chat.completions.create.return_value = mock_resp
         intake = IntakeAgent(
             voice_client=MagicMock(),
             rocketlane_client=MagicMock(),

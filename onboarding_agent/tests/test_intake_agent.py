@@ -17,9 +17,11 @@ from onboarding_agent.tests.conftest import (
 
 
 def _make_llm_response(parsed_fields: dict) -> MagicMock:
-    """Create a mock Anthropic LLM response returning JSON."""
+    """Create a mock LLM response returning JSON (Groq/OpenAI format)."""
+    mock_choice = MagicMock()
+    mock_choice.message.content = json.dumps(parsed_fields)
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=json.dumps(parsed_fields))]
+    mock_response.choices = [mock_choice]
     return mock_response
 
 
@@ -33,7 +35,7 @@ def _make_agent(
     """Build an IntakeAgent with fully mocked dependencies."""
     llm_client = MagicMock()
     if llm_parsed is not None:
-        llm_client.messages.create.return_value = _make_llm_response(llm_parsed)
+        llm_client.chat.completions.create.return_value = _make_llm_response(llm_parsed)
 
     voice_client = MagicMock()
     if voice_result is not None:
@@ -378,9 +380,11 @@ class TestEdgeCases:
 
     def test_llm_returns_garbage(self):
         agent = _make_agent()
-        agent.llm.messages.create.return_value = MagicMock(
-            content=[MagicMock(text="Sorry, I can't help with that.")]
-        )
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Sorry, I can't help with that."
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        agent.llm.chat.completions.create.return_value = mock_resp
 
         deal = agent.parse_email(VALID_DEAL_EMAIL)
 

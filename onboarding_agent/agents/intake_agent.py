@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import anthropic
-
 from onboarding_agent.config import settings
 from onboarding_agent.guardrails import (
     log_action,
@@ -33,6 +31,53 @@ Email Body:
 """
 
 
+def _build_llm_client(provider: str | None = None):
+    """Build an LLM client based on the configured provider.
+
+    Supports:
+      - "groq"      → Groq API (free, Llama 3.3 70B) via OpenAI-compatible SDK
+      - "anthropic"  → Anthropic Claude API
+    """
+    provider = provider or settings.LLM_PROVIDER
+
+    if provider == "groq":
+        from openai import OpenAI
+        return OpenAI(
+            api_key=settings.GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1",
+        )
+
+    if provider == "anthropic":
+        import anthropic
+        return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def _call_llm(client, prompt: str) -> str:
+    """Call the LLM and return the text response, regardless of provider."""
+    provider = settings.LLM_PROVIDER
+
+    if provider == "groq":
+        response = client.chat.completions.create(
+            model=settings.GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1024,
+            temperature=0,
+        )
+        return response.choices[0].message.content
+
+    if provider == "anthropic":
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+
+    raise ValueError(f"Unknown LLM provider: {provider}")
+
+
 class IntakeAgent:
     """
     Agent 1 — Intake & Routing.
@@ -45,14 +90,14 @@ class IntakeAgent:
         self,
         voice_client: BlandVoiceClient | None = None,
         rocketlane_client: RocketlaneClient | None = None,
-        llm_client: anthropic.Anthropic | None = None,
+        llm_client=None,
     ) -> None:
         self.voice_client = voice_client or BlandVoiceClient()
         self.rocketlane_client = rocketlane_client or RocketlaneClient()
-        self.llm = llm_client or anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.llm = llm_client or _build_llm_client()
 
     def parse_email(self, raw_email: dict) -> DealEmail | None:
-        """Use Claude to extract structured deal data from a raw email."""
+        """Use the LLM to extract structured deal data from a raw email."""
         prompt = EMAIL_PARSE_PROMPT.format(
             subject=raw_email.get("subject", ""),
             from_addr=raw_email.get("from", ""),
@@ -68,12 +113,7 @@ class IntakeAgent:
         )
 
         try:
-            response = self.llm.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            content = response.content[0].text
+            content = _call_llm(self.llm, prompt)
 
             start = content.find("{")
             end = content.rfind("}") + 1

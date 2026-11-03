@@ -12,7 +12,6 @@ from onboarding_agent.config import settings
 from onboarding_agent.graph.state import OnboardingState
 from onboarding_agent.guardrails import (
     log_action,
-    validate_deal_email,
     validate_voice_call_result,
     validate_project_not_duplicate,
 )
@@ -64,43 +63,6 @@ def parse_email(state: OnboardingState) -> dict:
         "deal_data": deal.model_dump(mode="json"),
         "status": "processing",
         "error": "",
-    }
-
-
-# ── Node: Validate Email ───────────────────────────────────────────
-
-def validate_email(state: OnboardingState) -> dict:
-    """Validate that all parsed fields are present and well-formed."""
-    deal_data = state.get("deal_data")
-
-    if deal_data is None:
-        return {
-            "validation_ok": False,
-            "validation_errors": ["No deal data to validate"],
-            "status": "failed",
-        }
-
-    result = validate_deal_email(deal_data)
-
-    log_action(
-        agent_name="WorkflowNode:validate_email",
-        action="field_validation",
-        inputs={"customer_name": deal_data.get("customer_name")},
-        outputs={"valid": result.is_valid, "errors": result.errors},
-        success=result.is_valid,
-        error_message="; ".join(result.errors) if not result.is_valid else "",
-        decision_rationale=(
-            "All fields valid — proceeding to voice call"
-            if result.is_valid
-            else "Missing or invalid fields — cannot proceed without clarification"
-        ),
-    )
-
-    return {
-        "validation_ok": result.is_valid,
-        "validation_errors": result.errors,
-        "status": "processing" if result.is_valid else "failed",
-        "error": "; ".join(result.errors) if not result.is_valid else "",
     }
 
 
@@ -311,15 +273,8 @@ def escalate(state: OnboardingState) -> dict:
 # ── Routing functions (conditional edges) ───────────────────────────
 
 def route_after_parse(state: OnboardingState) -> str:
-    """After parsing: if deal_data exists, validate; otherwise escalate."""
+    """After parsing: if deal_data exists, proceed to voice call; otherwise escalate."""
     if state.get("deal_data") is not None:
-        return "validate_email"
-    return "escalate"
-
-
-def route_after_validation(state: OnboardingState) -> str:
-    """After validation: if valid, call AE; otherwise escalate."""
-    if state.get("validation_ok"):
         return "call_ae"
     return "escalate"
 
