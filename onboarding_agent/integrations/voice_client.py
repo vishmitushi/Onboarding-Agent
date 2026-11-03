@@ -213,87 +213,64 @@ class BlandVoiceClient:
   </div>
 </div>
 
-<script>
-  let vapi = null;
+<script type="module">
+  import Vapi from 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.2.5/+esm';
 
-  async function loadVapiSDK() {{
-    return new Promise((resolve, reject) => {{
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@2.3.1/dist/vapi.min.js';
-      script.onload = resolve;
-      script.onerror = () => {{
-        const fallback = document.createElement('script');
-        fallback.src = 'https://unpkg.com/@vapi-ai/web@2.3.1/dist/vapi.min.js';
-        fallback.onload = resolve;
-        fallback.onerror = reject;
-        document.head.appendChild(fallback);
-      }};
-      document.head.appendChild(script);
-    }});
-  }}
+  let vapiInstance = null;
+  const statusEl = document.getElementById('status');
+  const startBtn = document.getElementById('startBtn');
+  const endBtn = document.getElementById('endBtn');
 
-  async function startCall() {{
-    const statusEl = document.getElementById('status');
-    const startBtn = document.getElementById('startBtn');
-    const endBtn = document.getElementById('endBtn');
-
-    statusEl.textContent = 'Loading Vapi SDK...';
+  window.startCall = async function() {{
     startBtn.disabled = true;
+    statusEl.textContent = 'Connecting...';
 
     try {{
-      await loadVapiSDK();
+      vapiInstance = new Vapi('{public_key}');
 
-      const VapiClass = window.Vapi || (window.vapiSDK && window.vapiSDK.default);
-      if (!VapiClass) {{
-        statusEl.textContent = 'Error: Vapi SDK not loaded. Check console.';
-        startBtn.disabled = false;
-        return;
-      }}
-
-      vapi = new VapiClass('{public_key}');
-
-      vapi.on('call-start', () => {{
+      vapiInstance.on('call-start', () => {{
         statusEl.textContent = 'Connected! Speak now...';
         statusEl.className = 'status active pulse';
         endBtn.style.display = 'inline-block';
       }});
 
-      vapi.on('call-end', () => {{
+      vapiInstance.on('call-end', () => {{
         statusEl.textContent = 'Call ended. You can close this tab.';
         statusEl.className = 'status ended';
         endBtn.style.display = 'none';
         startBtn.style.display = 'none';
       }});
 
-      vapi.on('speech-start', () => {{
+      vapiInstance.on('speech-start', () => {{
         statusEl.textContent = 'AI is speaking...';
       }});
 
-      vapi.on('speech-end', () => {{
+      vapiInstance.on('speech-end', () => {{
         statusEl.textContent = 'Your turn — speak now...';
       }});
 
-      vapi.on('error', (e) => {{
+      vapiInstance.on('error', (e) => {{
+        console.error('Vapi error:', e);
         statusEl.textContent = 'Error: ' + (e.message || JSON.stringify(e));
         statusEl.className = 'status';
         startBtn.disabled = false;
         endBtn.style.display = 'none';
       }});
 
-      statusEl.textContent = 'Connecting...';
-      await vapi.start('{assistant_id}');
+      await vapiInstance.start('{assistant_id}');
 
     }} catch (err) {{
+      console.error('Start failed:', err);
       statusEl.textContent = 'Failed to start: ' + err.message;
       startBtn.disabled = false;
     }}
-  }}
+  }};
 
-  function endCall() {{
-    if (vapi) {{
-      vapi.stop();
+  window.endCall = function() {{
+    if (vapiInstance) {{
+      vapiInstance.stop();
     }}
-  }}
+  }};
 </script>
 </body>
 </html>"""
