@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -143,8 +144,9 @@ class RocketlaneClient:
 
             if template_id is not None:
                 print(f"  [DEBUG] Importing template {template_id} into project {project_id}...")
+                time.sleep(2)
                 try:
-                    self.import_template(str(project_id), int(template_id))
+                    self.import_template(int(project_id), int(template_id))
                     log_action(
                         agent_name="RocketlaneClient",
                         action="template_imported",
@@ -194,14 +196,33 @@ class RocketlaneClient:
             )
             raise
 
-    def import_template(self, project_id: str, template_id: int) -> dict[str, Any]:
+    def import_template(self, project_id: int, template_id: int) -> dict[str, Any]:
         """Import a template into an existing project."""
         start_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        payload = {
+        payload = [{
             "startDate": start_date,
             "templateId": int(template_id),
-        }
-        return self._request("POST", f"/projects/{project_id}/import-template", payload)
+        }]
+        url = f"{self.base_url}/projects/{int(project_id)}/import-template"
+        print(f"  [DEBUG] import_template URL: {url}")
+        print(f"  [DEBUG] import_template payload: {payload}")
+        resp = requests.post(url, json=payload, headers=self.headers, timeout=30,
+                             verify=settings.ROCKETLANE_VERIFY_SSL)
+        if not resp.ok:
+            body = resp.text[:500] if resp.text else "(empty)"
+            print(f"  [DEBUG] import_template FAILED: {resp.status_code} {body}")
+            # Retry with object payload instead of array
+            payload_obj = {"startDate": start_date, "templateId": int(template_id)}
+            print(f"  [DEBUG] Retrying with object payload: {payload_obj}")
+            resp = requests.post(url, json=payload_obj, headers=self.headers, timeout=30,
+                                 verify=settings.ROCKETLANE_VERIFY_SSL)
+            if not resp.ok:
+                body = resp.text[:500] if resp.text else "(empty)"
+                raise requests.HTTPError(
+                    f"{resp.status_code} {resp.reason} for POST import-template: {body}",
+                    response=resp,
+                )
+        return resp.json() if resp.content else {}
 
     def check_existing_projects(self, customer_name: str) -> list[dict[str, Any]]:
         try:
