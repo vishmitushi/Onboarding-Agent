@@ -206,7 +206,7 @@ class RocketlaneClient:
         url = f"{self.base_url}/projects/{int(project_id)}/import-template"
         print(f"  [DEBUG] import_template URL: {url}")
         print(f"  [DEBUG] import_template payload: {payload}")
-        resp = requests.post(url, json=payload, headers=self.headers, timeout=30,
+        resp = requests.post(url, json=payload, headers=self.headers, timeout=60,
                              verify=settings.ROCKETLANE_VERIFY_SSL)
         if not resp.ok:
             body = resp.text[:500] if resp.text else "(empty)"
@@ -214,7 +214,7 @@ class RocketlaneClient:
             # Retry with object payload instead of array
             payload_obj = {"startDate": start_date, "templateId": int(template_id)}
             print(f"  [DEBUG] Retrying with object payload: {payload_obj}")
-            resp = requests.post(url, json=payload_obj, headers=self.headers, timeout=30,
+            resp = requests.post(url, json=payload_obj, headers=self.headers, timeout=60,
                                  verify=settings.ROCKETLANE_VERIFY_SSL)
             if not resp.ok:
                 body = resp.text[:500] if resp.text else "(empty)"

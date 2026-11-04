@@ -86,18 +86,21 @@ def validate_project_not_duplicate(
     """Check that the customer doesn't already have an active onboarding project."""
     errors: list[str] = []
 
+    non_duplicate_statuses = ("completed", "done", "closed", "archived", "cancelled")
+
     for proj in existing_projects:
-        proj_name = proj.get("name", "").lower()
-        proj_status = proj.get("status", "").lower()
-        if customer_name.lower() in proj_name and proj_status in (
-            "active",
-            "in_progress",
-            "in progress",
-            "not started",
-        ):
+        proj_name = (proj.get("projectName") or proj.get("name", "")).lower()
+        raw_status = proj.get("status", "")
+        if isinstance(raw_status, dict):
+            proj_status = raw_status.get("label", "").lower()
+        else:
+            proj_status = str(raw_status).lower()
+
+        if customer_name.lower() in proj_name and proj_status not in non_duplicate_statuses:
+            proj_id = proj.get("projectId", proj.get("id"))
             errors.append(
                 f"Customer '{customer_name}' already has an active onboarding project: "
-                f"{proj.get('name')} (ID: {proj.get('id')})"
+                f"{proj.get('projectName', proj.get('name'))} (ID: {proj_id}, status: {proj_status})"
             )
 
     return ValidationResult(is_valid=len(errors) == 0, errors=errors)
