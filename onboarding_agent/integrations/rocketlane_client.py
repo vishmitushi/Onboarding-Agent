@@ -63,35 +63,12 @@ class RocketlaneClient:
         raise requests.ConnectionError("No working templates endpoint found")
 
     def get_template_id(self, plan_tier: PlanTier) -> int | None:
-        """Find the template matching the plan tier.
+        """Get the project template ID for a plan tier.
 
-        Priority: API lookup by name → .env configured ID as fallback.
+        Rocketlane's /templates API returns document templates, not project
+        templates.  Project template IDs must be configured in .env (grab
+        them from the Rocketlane portal URL).
         """
-        config = PLAN_TIER_CONFIG[plan_tier]
-        template_name = config["template_name"]
-        try:
-            templates = self.list_templates()
-            for tpl in templates:
-                if template_name.lower() in tpl.get("name", "").lower():
-                    tid = tpl.get("templateId", tpl.get("id"))
-                    if tid is not None:
-                        log_action(
-                            agent_name="RocketlaneClient",
-                            action="template_found",
-                            inputs={"plan_tier": plan_tier.value, "template_name": template_name},
-                            outputs={"template_id": tid},
-                            decision_rationale=f"Matched template '{template_name}' → ID {tid}",
-                        )
-                        return int(tid)
-        except requests.RequestException as e:
-            log_action(
-                agent_name="RocketlaneClient",
-                action="template_api_failed",
-                inputs={"plan_tier": plan_tier.value},
-                outputs={"error": str(e)},
-                decision_rationale="Templates API failed; checking .env fallback",
-            )
-
         env_id = (
             settings.ROCKETLANE_ENTERPRISE_TEMPLATE_ID if plan_tier == PlanTier.ENTERPRISE
             else settings.ROCKETLANE_GROWTH_TEMPLATE_ID
@@ -99,13 +76,20 @@ class RocketlaneClient:
         if env_id:
             log_action(
                 agent_name="RocketlaneClient",
-                action="template_from_config",
+                action="template_resolved",
                 inputs={"plan_tier": plan_tier.value, "template_id": env_id},
                 outputs={},
-                decision_rationale=f"Using .env fallback template ID {env_id} for {plan_tier.value}",
+                decision_rationale=f"Using project template ID {env_id} for {plan_tier.value}",
             )
             return int(env_id)
 
+        log_action(
+            agent_name="RocketlaneClient",
+            action="template_not_configured",
+            inputs={"plan_tier": plan_tier.value},
+            outputs={},
+            decision_rationale="No project template ID configured in .env; project will be created without a template",
+        )
         return None
 
     def list_projects(self) -> list[dict[str, Any]]:
@@ -153,9 +137,12 @@ class RocketlaneClient:
 
         try:
             data = self._request("POST", "/projects", payload)
-            project_id = data.get("id", data.get("projectId", ""))
+            project_id = data.get("projectId", data.get("id", ""))
+            print(f"  [DEBUG] Create project response keys: {list(data.keys())}")
+            print(f"  [DEBUG] Extracted project_id: {project_id} (type: {type(project_id).__name__})")
 
             if template_id is not None:
+                print(f"  [DEBUG] Importing template {template_id} into project {project_id}...")
                 try:
                     self.import_template(str(project_id), int(template_id))
                     log_action(
