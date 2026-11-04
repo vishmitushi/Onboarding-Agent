@@ -113,17 +113,12 @@ def step2_rocketlane_create_project():
 
     client = RocketlaneClient()
 
-    info("Listing existing templates...")
-    try:
-        templates = client.list_templates()
-        if templates:
-            success(f"Found {len(templates)} template(s):")
-            for t in templates:
-                info(f"  - {t.get('name', 'Unknown')} (ID: {t.get('id', 'N/A')})")
-        else:
-            warn("No templates found. Project will be created without a template.")
-    except Exception as e:
-        warn(f"Could not list templates: {e}")
+    info("Resolving template ID for Enterprise plan...")
+    template_id = client.get_template_id(PlanTier.ENTERPRISE)
+    if template_id:
+        success(f"Template ID: {template_id}")
+    else:
+        warn("No template ID configured. Set ROCKETLANE_ENTERPRISE_TEMPLATE_ID in .env")
 
     info("Creating test project: 'Test Corp - Onboarding' (Enterprise)...")
     try:
@@ -131,6 +126,7 @@ def step2_rocketlane_create_project():
             customer_name="Test Corp",
             plan_tier=PlanTier.ENTERPRISE,
             customer_email="test@testcorp.com",
+            template_id=template_id,
         )
         success(f"Project created! ID: {project.project_id}")
         info(f"  Name: {project.project_name}")
